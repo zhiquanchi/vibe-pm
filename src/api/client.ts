@@ -73,6 +73,7 @@ export class ApiClient {
   delete<T>(path: string, query = '') { return this.request<T>(`${path}${query}`, { method: 'DELETE' }); }
 
   getSprintDetail(id: number, signal?: AbortSignal) { return this.get<SprintDetail>(`/sprints/${id}`, signal); }
+  listSprints(signal?: AbortSignal) { return this.get<Sprint[]>('/sprints', signal); }
   createSprint(input: SprintCreateInput) { return this.post<Sprint>('/sprints', input); }
   updateSprint(id: number, status: SprintStatus) { return this.patch<SprintStatusResult>(`/sprints/${id}`, { status }); }
   listTasks(sprintId?: number, signal?: AbortSignal) { return this.get<Task[]>(sprintId == null ? '/tasks' : `/tasks?sprint_id=${sprintId}`, signal); }
