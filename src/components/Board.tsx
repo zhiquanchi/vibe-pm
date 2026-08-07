@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { DragEvent, FormEvent } from 'react';
 import { MoreHorizontal, Plus, Search, X, Zap } from 'lucide-react';
 import type { StoryPoints, Task, TaskCreateInput, TaskStatus, TaskUpdateInput } from '../types';
@@ -44,6 +44,8 @@ export function Board({
   const [showCreate, setShowCreate] = useState(false);
   const [draft, setDraft] = useState<Draft>(initialDraft);
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => setLocalTasks(inputTasks), [inputTasks]);
 
   // Keep the board controlled by the parent while retaining optimistic drag state.
   const tasks = useMemo(() => {
