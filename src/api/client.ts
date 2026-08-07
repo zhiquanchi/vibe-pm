@@ -83,7 +83,10 @@ export class ApiClient {
     return this.delete<{ deleted: boolean }>(`/tasks/${id}`, query);
   }
   listScopeChanges(sprintId: number, signal?: AbortSignal) { return this.get<ScopeChange[]>(`/sprints/${sprintId}/scope-changes`, signal); }
-  createScopeChange(sprintId: number, input: ScopeChangeCreateInput) { return this.post<ScopeChange>(`/sprints/${sprintId}/scope-changes`, input); }
+  async createScopeChange(sprintId: number, input: ScopeChangeCreateInput) {
+    const result = await this.post<ScopeChange | { scope_change: ScopeChange; capacity_warning?: string | null }>(`/sprints/${sprintId}/scope-changes`, input);
+    return 'scope_change' in result ? result.scope_change : result;
+  }
   listSnapshots(sprintId: number, signal?: AbortSignal) { return this.get<SprintSnapshot[]>(`/sprints/${sprintId}/snapshots`, signal); }
 }
 

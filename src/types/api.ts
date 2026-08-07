@@ -116,7 +116,9 @@ export interface TaskUpdateInput {
 export interface ScopeChangeCreateInput {
   task_id?: number | null;
   type: ScopeChangeType;
+  title?: string | null;
   description: string;
+  story_points?: StoryPoints;
   points_delta: number;
   reason?: string | null;
 }
