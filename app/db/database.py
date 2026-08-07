@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS projects (id INTEGER PRIMARY KEY, name TEXT NOT NULL,
 CREATE TABLE IF NOT EXISTS profiles (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, avatar_url TEXT, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS project_members (project_id INTEGER NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('owner','member')), PRIMARY KEY(project_id,user_id), FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE, FOREIGN KEY(user_id) REFERENCES profiles(id) ON DELETE CASCADE);
 CREATE TABLE IF NOT EXISTS sprints (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, name TEXT NOT NULL, goal TEXT, start_date TEXT NOT NULL, end_date TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'planning', initial_points REAL NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, sprint_id INTEGER, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'todo', story_points REAL NOT NULL DEFAULT 1, priority TEXT NOT NULL DEFAULT 'P2', assignee TEXT, position INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, sprint_id INTEGER, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'todo', story_points REAL NOT NULL DEFAULT 1, priority TEXT NOT NULL DEFAULT 'P2', assignee TEXT, position INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, completed_at TEXT);
 CREATE TABLE IF NOT EXISTS scope_changes (id INTEGER PRIMARY KEY, sprint_id INTEGER NOT NULL, task_id INTEGER, type TEXT NOT NULL, description TEXT NOT NULL, points_delta REAL NOT NULL, reason TEXT, created_by TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS sprint_snapshots (id INTEGER PRIMARY KEY, sprint_id INTEGER NOT NULL, snapshot_date TEXT NOT NULL, total_scope REAL NOT NULL, completed_points REAL NOT NULL, remaining_points REAL NOT NULL, UNIQUE(sprint_id, snapshot_date));
 CREATE INDEX IF NOT EXISTS idx_tasks_sprint ON tasks(sprint_id, status);
@@ -77,6 +77,10 @@ def init_db(seed: bool = True) -> None:
     conn = get_connection()
     try:
         conn.executescript(SCHEMA)
+        # Keep existing SQLite databases compatible with the task completion contract.
+        task_columns = {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}
+        if "completed_at" not in task_columns:
+            conn.execute("ALTER TABLE tasks ADD COLUMN completed_at TEXT")
         if seed:
             _seed_demo(conn)
         conn.commit()

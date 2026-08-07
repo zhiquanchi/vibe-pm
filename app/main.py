@@ -6,6 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import cors_origins
 from app.db.database import init_db
 from app.routers.api import router
+from app.routers.projects import router as projects_router
+from app.routers.sprint_backlog import router as sprint_backlog_router
+from app.routers.tasks import router as tasks_router
 
 
 @asynccontextmanager
@@ -22,6 +25,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Domain routers are registered before the legacy compatibility router so the
+# persisted Sprint/task workflows are the canonical handlers.
+app.include_router(projects_router)
+app.include_router(sprint_backlog_router)
+app.include_router(tasks_router)
 app.include_router(router)
 
 # Make direct imports and CLI scripts usable even without a lifespan-aware client.
