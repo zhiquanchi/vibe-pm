@@ -81,6 +81,13 @@ def init_db(seed: bool = True) -> None:
         task_columns = {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}
         if "completed_at" not in task_columns:
             conn.execute("ALTER TABLE tasks ADD COLUMN completed_at TEXT")
+        snapshot_columns = {row[1] for row in conn.execute("PRAGMA table_info(sprint_snapshots)")}
+        if "ideal_completed" not in snapshot_columns:
+            conn.execute("ALTER TABLE sprint_snapshots ADD COLUMN ideal_completed REAL")
+        if "ideal_remaining" not in snapshot_columns:
+            conn.execute("ALTER TABLE sprint_snapshots ADD COLUMN ideal_remaining REAL")
+        if "scope_change_id" not in snapshot_columns:
+            conn.execute("ALTER TABLE sprint_snapshots ADD COLUMN scope_change_id INTEGER")
         if seed:
             _seed_demo(conn)
         conn.commit()
@@ -88,12 +95,31 @@ def init_db(seed: bool = True) -> None:
         conn.close()
 
 
-def snapshot(conn: sqlite3.Connection, sprint_id: int) -> None:
-    total = conn.execute("SELECT COALESCE(SUM(story_points),0) FROM tasks WHERE sprint_id=?", (sprint_id,)).fetchone()[0]
-    progress = {"done": 1, "in_review": 0.8, "in_progress": 0.5, "todo": 0}
-    completed = sum(row[0] * progress[row[1]] for row in conn.execute("SELECT story_points,status FROM tasks WHERE sprint_id=?", (sprint_id,)))
-    today = date.today().isoformat()
+def snapshot(conn: sqlite3.Connection, sprint_id: int, snapshot_date: date | None = None, scope_change_id: int | None = None) -> None:
+    """Upsert today's (or an explicitly requested date's) current snapshot.
+
+    Existing historical rows are only updated when the caller explicitly asks
+    for that date; normal mutations always use today and never rewrite history.
+    """
+    sprint = conn.execute("SELECT start_date,end_date,initial_points FROM sprints WHERE id=?", (sprint_id,)).fetchone()
+    if not sprint:
+        raise ValueError(f"Sprint {sprint_id} not found")
+    total = float(conn.execute("SELECT COALESCE(SUM(story_points),0) FROM tasks WHERE sprint_id=?", (sprint_id,)).fetchone()[0])
+    progress = {"done": 1.0, "in_review": 0.8, "in_progress": 0.5, "todo": 0.0}
+    completed = sum(float(row[0]) * progress[row[1]] for row in conn.execute("SELECT story_points,status FROM tasks WHERE sprint_id=?", (sprint_id,)))
+    day = snapshot_date or date.today()
+    start, end = date.fromisoformat(sprint[0]), date.fromisoformat(sprint[1])
+    duration = max((end - start).days, 1)
+    ratio = min(max((day - start).days / duration, 0.0), 1.0)
+    initial = float(sprint[2] or 0)
+    ideal_completed = initial * ratio
     conn.execute(
-        "INSERT INTO sprint_snapshots(sprint_id,snapshot_date,total_scope,completed_points,remaining_points) VALUES(?,?,?,?,?) ON CONFLICT(sprint_id,snapshot_date) DO UPDATE SET total_scope=excluded.total_scope,completed_points=excluded.completed_points,remaining_points=excluded.remaining_points",
-        (sprint_id, today, total, completed, total - completed),
+        """INSERT INTO sprint_snapshots
+           (sprint_id,snapshot_date,total_scope,completed_points,remaining_points,ideal_completed,ideal_remaining,scope_change_id)
+           VALUES(?,?,?,?,?,?,?,?)
+           ON CONFLICT(sprint_id,snapshot_date) DO UPDATE SET
+             total_scope=excluded.total_scope, completed_points=excluded.completed_points,
+             remaining_points=excluded.remaining_points, ideal_completed=excluded.ideal_completed,
+             ideal_remaining=excluded.ideal_remaining, scope_change_id=COALESCE(excluded.scope_change_id,sprint_snapshots.scope_change_id)""",
+        (sprint_id, day.isoformat(), total, completed, total - completed, ideal_completed, initial - ideal_completed, scope_change_id),
     )

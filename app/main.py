@@ -9,6 +9,7 @@ from app.routers.api import router
 from app.routers.projects import router as projects_router
 from app.routers.sprint_backlog import router as sprint_backlog_router
 from app.routers.tasks import router as tasks_router
+from app.routers.scope_changes import router as scope_changes_router
 
 
 @asynccontextmanager
@@ -30,6 +31,7 @@ app.add_middleware(
 app.include_router(projects_router)
 app.include_router(sprint_backlog_router)
 app.include_router(tasks_router)
+app.include_router(scope_changes_router)
 app.include_router(router)
 
 # Make direct imports and CLI scripts usable even without a lifespan-aware client.
