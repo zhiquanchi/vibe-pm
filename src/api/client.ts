@@ -77,6 +77,9 @@ export class ApiClient {
   createSprint(input: SprintCreateInput) { return this.post<Sprint>('/sprints', input); }
   updateSprint(id: number, status: SprintStatus) { return this.patch<SprintStatusResult>(`/sprints/${id}`, { status }); }
   listTasks(sprintId?: number, signal?: AbortSignal) { return this.get<Task[]>(sprintId == null ? '/tasks' : `/tasks?sprint_id=${sprintId}`, signal); }
+  listBacklog(projectId = 1, signal?: AbortSignal) { return this.get<Task[]>(`/backlog?project_id=${projectId}`, signal); }
+  addTaskToSprint(sprintId: number, taskId: number, reason?: string) { return this.post<Task>(`/sprints/${sprintId}/tasks/${taskId}`, { reason }); }
+  removeTaskFromSprint(sprintId: number, taskId: number) { return this.delete<Task>(`/sprints/${sprintId}/tasks/${taskId}`); }
   createTask(input: TaskCreateInput) { return this.post<Task>('/tasks', input); }
   updateTask(id: number, input: TaskUpdateInput) { return this.patch<Task>(`/tasks/${id}`, input); }
   deleteTask(id: number, reason?: string) {

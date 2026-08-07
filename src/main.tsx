@@ -8,6 +8,7 @@ import { apiClient } from './api';
 import { useSprintWorkspace } from './hooks';
 import type { ScopeChange, Sprint, SprintStatus, Task, TaskCreateInput, TaskStatus } from './types';
 import './styles.css';
+import './backlog.css';
 
 const statusLabel: Record<SprintStatus, string> = { planning: '规划中', active: '进行中', completed: '已完成' };
 const demoText: Record<string, string> = {
@@ -32,6 +33,8 @@ function App() {
   const [sprintId, setSprintId] = useState(1);
   const [sprints, setSprints] = useState<Sprint[]>([]);
   const [showSprintForm, setShowSprintForm] = useState(false);
+  const [showBacklog, setShowBacklog] = useState(false);
+  const [backlog, setBacklog] = useState<Task[]>([]);
   const workspace = useSprintWorkspace(sprintId);
   useEffect(() => { void apiClient.listSprints().then(setSprints); }, []);
   const [selectedChange, setSelectedChange] = useState<ScopeChange | null>(null);
@@ -59,6 +62,8 @@ function App() {
   const handleRemoveChange = async (change: ScopeChange) => { if (!change.task_id) return; await workspace.createScopeChange({ type: 'remove_task', task_id: change.task_id, description: change.description, points_delta: change.points_delta, reason: '需求移出 Sprint' }); await workspace.refresh(); };
   const handleChangePoints = async (change: ScopeChange) => { if (!change.task_id) return; const next = Number(window.prompt('请输入新的故事点（1/2/3/5/8/13）', '3')); if (![1, 2, 3, 5, 8, 13].includes(next)) return; await workspace.createScopeChange({ type: 'change_points', task_id: change.task_id, description: change.description, story_points: next as 1 | 2 | 3 | 5 | 8 | 13, points_delta: 0, reason: '重新估算故事点' }); await workspace.refresh(); };
   const handleCreateSprint = async (event: React.FormEvent<HTMLFormElement>) => { event.preventDefault(); const form = new FormData(event.currentTarget); const created = await apiClient.createSprint({ name: String(form.get('name')), goal: String(form.get('goal') || ''), start_date: String(form.get('start_date')), end_date: String(form.get('end_date')) }); setSprints((items) => [created, ...items]); setSprintId(created.id); setShowSprintForm(false); };
+  const openBacklog = async () => { setShowBacklog(true); setBacklog(await apiClient.listBacklog()); };
+  const addBacklogTask = async (task: Task) => { await apiClient.addTaskToSprint(sprintId, task.id, '加入当前 Sprint'); setBacklog((items) => items.filter((item) => item.id !== task.id)); await workspace.refresh(); };
   const handleStatusChange = async () => {
     if (!sprint) return;
     const next: SprintStatus = sprint.status === 'planning' ? 'active' : sprint.status === 'active' ? 'completed' : 'planning';
@@ -68,7 +73,7 @@ function App() {
   return <div className="app-shell">
     <aside className="sidebar"><div className="brand"><div className="brand-mark"><Zap size={16} fill="currentColor" /></div><span>vibe<span className="brand-accent">pm</span></span></div>
       <div className="workspace-switch"><div className="workspace-icon">V</div><div><b>Vibe PM</b><small>个人工作区</small></div><ChevronDown size={15} /></div>
-      <nav><Nav icon={<LayoutDashboard size={17} />} label="总览" active /><Nav icon={<Activity size={17} />} label="Sprint 看板" /><Nav icon={<BarChart3 size={17} />} label="报告" /><Nav icon={<Archive size={17} />} label="待办列表" /></nav>
+      <nav><Nav icon={<LayoutDashboard size={17} />} label="总览" active /><Nav icon={<Activity size={17} />} label="Sprint 看板" /><Nav icon={<BarChart3 size={17} />} label="报告" /><Nav icon={<Archive size={17} />} label="待办列表" onClick={() => void openBacklog()} /></nav>
       <div className="nav-label">工作区</div><nav><Nav icon={<Users size={17} />} label="成员" /><Nav icon={<GitBranch size={17} />} label="集成" /></nav><div className="sidebar-bottom"><Nav icon={<Settings2 size={17} />} label="设置" /><div className="user"><div className="avatar avatar-purple">XM</div><div><b>小明</b><small>技术负责人</small></div><MoreHorizontal size={16} /></div></div>
     </aside>
     <main className="main"><header className="topbar"><div className="breadcrumbs"><span>Vibe PM</span><span>/</span><b>{sprint?.name || 'Sprint'}</b><span className="status-pill active"><i /> {sprint ? statusLabel[sprint.status] : '加载中'}</span></div><div className="top-actions"><button className="icon-btn" title="通知"><Bell size={18} /></button><div className="avatar avatar-blue">XM</div></div></header>
@@ -77,6 +82,7 @@ function App() {
       <section className="metrics"><Metric label="范围" value={`${currentScope} pt`} note={`初始 ${total} pt`} tone="blue" /><Metric label="已完成" value={`${completed.toFixed(1)} pt`} note={`${currentScope ? Math.round(completed / currentScope * 100) : 0}% 的范围`} tone="green" /><Metric label="剩余" value={`${Math.max(0, currentScope - completed).toFixed(1)} pt`} note="按当前状态计算" tone="orange" /><Metric label="范围变更" value={`${workspace.scopeChanges.length} 次`} note={`${changeDelta >= 0 ? '+' : ''}${changeDelta} pt`} tone="purple" /></section>
       <section className="grid-main"><div className="chart-card panel">{workspace.loading && !workspace.snapshots.length ? <div className="loading-state">正在加载燃起图…</div> : <BurnupChart snapshots={workspace.snapshots} scopeChanges={displayChanges} initialPoints={sprint?.initial_points} />}</div><ScopeTimeline changes={displayChanges} capacityWarning={capacityWarning} onAddTask={() => void handleScopeAdd()} onRemoveTask={(change) => void handleRemoveChange(change)} onChangePoints={(change) => void handleChangePoints(change)} onSelectChange={setSelectedChange} /></section>
       <Board tasks={displayTasks} projectId={1} sprintId={sprintId} onCreateTask={handleCreateTask} onStatusChange={handleStatus} onEditTask={async (task, input) => { await workspace.updateTask(task.id, input); await workspace.refresh(); }} onDeleteTask={handleDelete} />
+      {showBacklog && <div className="overlay" onClick={() => setShowBacklog(false)}><div className="modal backlog-modal" onClick={(event) => event.stopPropagation()}><div className="drawer-head"><div><span className="eyebrow">BACKLOG</span><h2>待办列表</h2></div><button className="icon-btn" onClick={() => setShowBacklog(false)}>×</button></div><div className="backlog-list">{backlog.length === 0 ? <p className="empty-copy">暂无待办任务</p> : backlog.map((task) => <div className="backlog-row" key={task.id}><div><b>{zhDemo(task.title)}</b><small>{task.story_points} pt · {task.priority}</small></div><button className="primary-btn" onClick={() => void addBacklogTask(task)}>加入 Sprint</button></div>)}</div></div></div>}
       {showSprintForm && <div className="overlay" onClick={() => setShowSprintForm(false)}><div className="modal" onClick={(event) => event.stopPropagation()}><div className="drawer-head"><span>新建 Sprint</span><button className="icon-btn" onClick={() => setShowSprintForm(false)}>×</button></div><form onSubmit={handleCreateSprint}><label>Sprint 名称<input name="name" required placeholder="Sprint 15" /></label><label>目标<input name="goal" placeholder="本次迭代要达成什么？" /></label><div className="drawer-grid"><label>开始日期<input name="start_date" type="date" required /></label><label>结束日期<input name="end_date" type="date" required /></label></div><button className="primary-btn full" type="submit">创建 Sprint</button></form></div></div>}
       {selectedChange && <div className="overlay" onClick={() => setSelectedChange(null)}><div className="modal" onClick={(event) => event.stopPropagation()}><div className="drawer-head"><span>范围变更详情</span><button className="icon-btn" onClick={() => setSelectedChange(null)}>×</button></div><div className="drawer-body"><h2>{selectedChange.description}</h2><p className="drawer-desc">{selectedChange.reason || '未填写原因'}</p><p>点数变化：<b>{selectedChange.points_delta > 0 ? '+' : ''}{selectedChange.points_delta} pt</b></p><p>操作人：{selectedChange.created_by || '未知'}</p></div></div></div>}
       </div>
@@ -84,7 +90,7 @@ function App() {
   </div>;
 }
 
-function Nav({ icon, label, active }: { icon: React.ReactNode; label: string; active?: boolean }) { return <button className={`nav-item ${active ? 'active' : ''}`}>{icon}<span>{label}</span>{active && <i />}</button>; }
+function Nav({ icon, label, active, onClick }: { icon: React.ReactNode; label: string; active?: boolean; onClick?: () => void }) { return <button className={`nav-item ${active ? 'active' : ''}`} onClick={onClick}>{icon}<span>{label}</span>{active && <i />}</button>; }
 function Metric({ label, value, note, tone }: { label: string; value: string; note: string; tone: string }) { return <div className="metric"><div className={`metric-icon ${tone}`}><Activity size={16} /></div><div><span>{label}</span><b>{value}</b><small>{note}</small></div></div>; }
 
 createRoot(document.getElementById('root')!).render(<App />);
