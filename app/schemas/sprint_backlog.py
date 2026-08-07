@@ -25,6 +25,16 @@ class SprintStatusUpdate(BaseModel):
     status: SprintStatus
 
 
+class SprintDatesUpdate(BaseModel):
+    start_date: date
+    end_date: date
+
+    @model_validator(mode="after")
+    def validate_dates(self):
+        if self.end_date < self.start_date:
+            raise ValueError("end_date must be on or after start_date")
+        return self
+
+
 class SprintMoveTaskRequest(BaseModel):
     reason: str | None = None
-

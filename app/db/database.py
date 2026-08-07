@@ -7,7 +7,7 @@ from app.core.config import database_path
 
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS projects (id INTEGER PRIMARY KEY, name TEXT NOT NULL, description TEXT, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS projects (id INTEGER PRIMARY KEY, name TEXT NOT NULL, description TEXT, default_sprint_weeks INTEGER NOT NULL DEFAULT 2, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS profiles (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, avatar_url TEXT, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS project_members (project_id INTEGER NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('owner','member')), PRIMARY KEY(project_id,user_id), FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE, FOREIGN KEY(user_id) REFERENCES profiles(id) ON DELETE CASCADE);
 CREATE TABLE IF NOT EXISTS sprints (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, name TEXT NOT NULL, goal TEXT, start_date TEXT NOT NULL, end_date TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'planning', initial_points REAL NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
@@ -81,6 +81,9 @@ def init_db(seed: bool = True) -> None:
         task_columns = {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}
         if "completed_at" not in task_columns:
             conn.execute("ALTER TABLE tasks ADD COLUMN completed_at TEXT")
+        project_columns = {row[1] for row in conn.execute("PRAGMA table_info(projects)")}
+        if "default_sprint_weeks" not in project_columns:
+            conn.execute("ALTER TABLE projects ADD COLUMN default_sprint_weeks INTEGER NOT NULL DEFAULT 2")
         snapshot_columns = {row[1] for row in conn.execute("PRAGMA table_info(sprint_snapshots)")}
         if "ideal_completed" not in snapshot_columns:
             conn.execute("ALTER TABLE sprint_snapshots ADD COLUMN ideal_completed REAL")

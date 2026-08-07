@@ -98,6 +98,8 @@ def list_backlog(conn: sqlite3.Connection, project_id: int) -> list[dict]:
 
 def move_task(conn: sqlite3.Connection, sprint_id: int, task_id: int, into: bool, reason: str | None = None) -> dict:
     sprint = _sprint(conn, sprint_id)
+    if sprint["status"] == "completed":
+        raise HTTPException(status_code=409, detail="已完成 Sprint 为只读状态")
     task = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")

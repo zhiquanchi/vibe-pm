@@ -23,6 +23,11 @@ def _require_sprint(conn: sqlite3.Connection, sprint_id: int | None) -> None:
         raise HTTPException(status_code=404, detail="Sprint not found")
 
 
+def _require_writable_sprint(conn: sqlite3.Connection, sprint_id: int | None) -> None:
+    if sprint_id is not None and conn.execute("SELECT 1 FROM sprints WHERE id=? AND status<>'completed'", (sprint_id,)).fetchone() is None:
+        raise HTTPException(status_code=409, detail="已完成 Sprint 为只读状态")
+
+
 def _next_position(conn: sqlite3.Connection, sprint_id: int | None) -> int:
     row = conn.execute("SELECT COALESCE(MAX(position), -1) + 1 FROM tasks WHERE sprint_id IS ?", (sprint_id,)).fetchone()
     return int(row[0])
@@ -56,6 +61,7 @@ def list_tasks(conn: sqlite3.Connection, sprint_id: int | None = None) -> list[d
 def create_task(conn: sqlite3.Connection, data: dict[str, Any]) -> dict[str, Any]:
     sprint_id = data["sprint_id"]
     _require_sprint(conn, sprint_id)
+    _require_writable_sprint(conn, sprint_id)
     position = data["position"] if data["position"] is not None else _next_position(conn, sprint_id)
     now = _now()
     completed_at = now if data["status"] == "done" else None
@@ -82,6 +88,8 @@ def update_task(conn: sqlite3.Connection, task_id: int, data: dict[str, Any]) ->
     old_sprint = task["sprint_id"]
     new_sprint = data.get("sprint_id", old_sprint)
     _require_sprint(conn, new_sprint)
+    _require_writable_sprint(conn, old_sprint)
+    _require_writable_sprint(conn, new_sprint)
     now = _now()
     if "status" in data:
         data["completed_at"] = now if data["status"] == "done" else None
@@ -110,6 +118,7 @@ def delete_task(conn: sqlite3.Connection, task_id: int, reason: str | None = Non
     task = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    _require_writable_sprint(conn, task["sprint_id"])
     if _active_sprint(conn, task["sprint_id"]):
         _scope_change(conn, sprint_id=task["sprint_id"], task_id=task_id, change_type="remove_task", description=f"Deleted {task['title']}", points_delta=-float(task["story_points"]), reason=reason, created_by=created_by)
         snapshot(conn, task["sprint_id"])

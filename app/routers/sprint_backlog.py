@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 
 from app.db.database import get_connection
-from app.schemas.sprint_backlog import SprintCreateRequest, SprintMoveTaskRequest, SprintStatusUpdate
+from app.schemas.sprint_backlog import SprintCreateRequest, SprintDatesUpdate, SprintMoveTaskRequest, SprintStatusUpdate
 from app.services import sprint_backlog
 
 
@@ -44,6 +44,17 @@ def get_sprint_snapshots(sprint_id: int, conn=Depends(db_connection)):
 @router.patch("/sprints/{sprint_id}")
 def patch_sprint(sprint_id: int, payload: SprintStatusUpdate, conn=Depends(db_connection)):
     return sprint_backlog.update_status(conn, sprint_id, payload.status)
+
+
+@router.patch("/sprints/{sprint_id}/dates")
+def patch_sprint_dates(sprint_id: int, payload: SprintDatesUpdate, conn=Depends(db_connection)):
+    sprint = sprint_backlog._sprint(conn, sprint_id)
+    if sprint["status"] != "planning":
+        from fastapi import HTTPException
+        raise HTTPException(status_code=409, detail="只有规划中的 Sprint 可以修改日期")
+    conn.execute("UPDATE sprints SET start_date=?,end_date=? WHERE id=?", (payload.start_date.isoformat(), payload.end_date.isoformat(), sprint_id))
+    conn.commit()
+    return sprint_backlog._sprint(conn, sprint_id)
 
 
 @router.get("/backlog")
