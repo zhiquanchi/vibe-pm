@@ -1,0 +1,6 @@
+.backlog-modal{max-height:80vh}
+.backlog-list{padding:20px 24px;display:flex;flex-direction:column;gap:10px;overflow:auto}
+.backlog-row{display:flex;align-items:center;justify-content:space-between;gap:16px;border:1px solid var(--border);border-radius:8px;padding:12px}
+.backlog-row>div{display:flex;flex-direction:column;gap:5px;min-width:0}
+.backlog-row b{font-size:12px}.backlog-row small{font-size:10px;color:var(--muted)}
+.backlog-row .primary-btn{white-space:nowrap}.empty-copy{color:var(--muted);font-size:12px;text-align:center;padding:24px}
