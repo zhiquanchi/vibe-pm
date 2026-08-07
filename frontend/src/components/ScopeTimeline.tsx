@@ -58,7 +58,7 @@ export function ScopeTimeline({
       <div className="scope-timeline__header">
         <div>
           <h2>范围变更时间线</h2>
-          <p>所有影响 Sprint 范围的变化</p>
+          <p>所有影响迭代范围的变化</p>
         </div>
         {onAddTask && (
           <button className="scope-timeline__add-button" type="button" onClick={onAddTask}>
@@ -126,7 +126,7 @@ export function ScopeTimeline({
                 {(change.type === 'remove_task' && onRemoveTask) || (change.type === 'change_points' && onChangePoints) ? (
                   <div className="scope-timeline__actions">
                     {change.type === 'remove_task' && onRemoveTask && (
-                      <button type="button" onClick={() => onRemoveTask(change)}>移出 Sprint</button>
+                      <button type="button" onClick={() => onRemoveTask(change)}>移出迭代</button>
                     )}
                     {change.type === 'change_points' && onChangePoints && (
                       <button type="button" onClick={() => onChangePoints(change)}>修改点数</button>

@@ -121,9 +121,9 @@ export function Board({
   };
 
   return (
-    <section className="board panel" aria-label="Sprint 看板">
+    <section className="board panel" aria-label="迭代看板">
       <div className="panel-head board-head">
-        <div><h2>Sprint 看板</h2><p>拖动任务卡片更新状态。</p></div>
+        <div><h2>迭代看板</h2><p>拖动任务卡片更新状态。</p></div>
         <div className="board-tools">
           <label className="search" aria-label="搜索任务">
             <Search size={15} />
@@ -168,7 +168,7 @@ export function Board({
 
 function TaskCard({ task, disabled, onClick, onEdit, onRemove, onDelete, onDragStart }: { task: Task; disabled: boolean; onClick: () => void; onEdit: () => void; onRemove?: () => void; onDelete?: () => void; onDragStart: (event: DragEvent<HTMLDivElement>) => void }) {
   const [menu, setMenu] = useState(false);
-  return <div className="task-card" draggable={!disabled} onDragStart={onDragStart} onClick={onClick} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onClick(); }}><div className="task-top"><span className={`priority p-${task.priority}`}>{task.priority}</span><button className="task-menu-trigger" type="button" title="任务操作" onClick={(event) => { event.stopPropagation(); setMenu(!menu); }}><MoreHorizontal size={15} /></button>{menu && <div className="task-menu" onClick={(event) => event.stopPropagation()}><button type="button" onClick={() => { setMenu(false); onEdit(); }}>编辑</button><button type="button" disabled={!onRemove} title={!onRemove ? '当前任务无法移出' : undefined} onClick={() => { setMenu(false); onRemove?.(); }}>移出 Sprint</button><button type="button" className="danger-action" disabled={!onDelete} onClick={() => { setMenu(false); onDelete?.(); }}>删除</button></div>}</div><h3>{task.title}</h3><div className="task-bottom"><span className="points"><Zap size={12} />{task.story_points}</span><span className="tag">{task.assignee ?? '未分配'}</span></div></div>;
+  return <div className="task-card" draggable={!disabled} onDragStart={onDragStart} onClick={onClick} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onClick(); }}><div className="task-top"><span className={`priority p-${task.priority}`}>{task.priority}</span><button className="task-menu-trigger" type="button" title="任务操作" onClick={(event) => { event.stopPropagation(); setMenu(!menu); }}><MoreHorizontal size={15} /></button>{menu && <div className="task-menu" onClick={(event) => event.stopPropagation()}><button type="button" onClick={() => { setMenu(false); onEdit(); }}>编辑</button><button type="button" disabled={!onRemove} title={!onRemove ? '当前任务无法移出' : undefined} onClick={() => { setMenu(false); onRemove?.(); }}>移出迭代</button><button type="button" className="danger-action" disabled={!onDelete} onClick={() => { setMenu(false); onDelete?.(); }}>删除</button></div>}</div><h3>{task.title}</h3><div className="task-bottom"><span className="points"><Zap size={12} />{task.story_points}</span><span className="tag">{task.assignee ?? '未分配'}</span></div></div>;
 }
 
 export default Board;

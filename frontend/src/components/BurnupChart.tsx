@@ -108,7 +108,7 @@ export function BurnupChart({ snapshots, scopeChanges = [], initialPoints, class
         <div className="burnup-chart-empty">
           <span className="burnup-chart-empty-icon">图</span>
           <strong>暂无图表数据</strong>
-          <p>Sprint 开始后，每日快照会自动显示在这里。</p>
+          <p>迭代开始后，每日快照会自动显示在这里。</p>
         </div>
       </section>
     );
