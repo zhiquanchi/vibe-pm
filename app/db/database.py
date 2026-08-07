@@ -90,6 +90,9 @@ def init_db(seed: bool = True) -> None:
             conn.execute("ALTER TABLE sprint_snapshots ADD COLUMN scope_change_id INTEGER")
         if seed:
             _seed_demo(conn)
+        # An active demo sprint should render immediately on a fresh install.
+        for row in conn.execute("SELECT id FROM sprints WHERE status='active'").fetchall():
+            snapshot(conn, row[0])
         conn.commit()
     finally:
         conn.close()
