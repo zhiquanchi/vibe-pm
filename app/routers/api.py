@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from app.core.identity import current_user_id
 from app.db.database import get_connection, snapshot
 from app.schemas import ScopeChangeCreate, SprintCreate, TaskCreate, TaskUpdate
 from app.services.common import rowdict
@@ -85,7 +86,7 @@ def create_task(payload: TaskCreate):
 
 
 @router.patch("/tasks/{task_id}")
-def update_task(task_id: int, payload: TaskUpdate):
+def update_task(task_id: int, payload: TaskUpdate, user_id: str = Depends(current_user_id)):
     conn = get_connection()
     try:
         task = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
@@ -100,7 +101,7 @@ def update_task(task_id: int, payload: TaskUpdate):
         if "story_points" in data and data["story_points"] != task["story_points"] and task["sprint_id"]:
             conn.execute(
                 "INSERT INTO scope_changes(sprint_id,task_id,type,description,points_delta,created_by,created_at) VALUES(?,?,?,?,?,?,?)",
-                (task["sprint_id"], task_id, "change_points", f"Changed points for {task['title']}", data["story_points"] - task["story_points"], "current-user", datetime.utcnow().isoformat()),
+                (task["sprint_id"], task_id, "change_points", f"Changed points for {task['title']}", data["story_points"] - task["story_points"], user_id, datetime.utcnow().isoformat()),
             )
         if task["sprint_id"]:
             snapshot(conn, task["sprint_id"])
@@ -135,7 +136,7 @@ def scope_changes(sprint_id: int):
 
 
 @router.post("/sprints/{sprint_id}/scope-changes")
-def create_scope_change(sprint_id: int, payload: ScopeChangeCreate):
+def create_scope_change(sprint_id: int, payload: ScopeChangeCreate, user_id: str = Depends(current_user_id)):
     conn = get_connection()
     try:
         if not conn.execute("SELECT 1 FROM sprints WHERE id=?", (sprint_id,)).fetchone():
@@ -143,7 +144,7 @@ def create_scope_change(sprint_id: int, payload: ScopeChangeCreate):
         now = datetime.utcnow().isoformat()
         cursor = conn.execute(
             "INSERT INTO scope_changes(sprint_id,task_id,type,description,points_delta,reason,created_by,created_at) VALUES(?,?,?,?,?,?,?,?)",
-            (sprint_id, payload.task_id, payload.type, payload.description, payload.points_delta, payload.reason, payload.created_by, now),
+            (sprint_id, payload.task_id, payload.type, payload.description, payload.points_delta, payload.reason, user_id, now),
         )
         snapshot(conn, sprint_id)
         conn.commit()
