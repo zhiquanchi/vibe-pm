@@ -11,6 +11,10 @@ import type {
   Task,
   TaskCreateInput,
   TaskUpdateInput,
+  MemberCreateInput,
+  Project,
+  ProjectMember,
+  ProjectUpdateInput,
 } from '../types';
 
 const env = import.meta.env as Record<string, string | undefined>;
@@ -92,6 +96,11 @@ export class ApiClient {
     return 'scope_change' in result ? result.scope_change : result;
   }
   listSnapshots(sprintId: number, signal?: AbortSignal) { return this.get<SprintSnapshot[]>(`/sprints/${sprintId}/snapshots`, signal); }
+  getProject(projectId: number, signal?: AbortSignal) { return this.get<{ project: Project; members: ProjectMember[] }>(`/projects/${projectId}`, signal); }
+  updateProject(projectId: number, input: ProjectUpdateInput) { return this.patch<Project>(`/projects/${projectId}`, input); }
+  listMembers(projectId: number, signal?: AbortSignal) { return this.get<ProjectMember[]>(`/projects/${projectId}/members`, signal); }
+  addMember(projectId: number, input: MemberCreateInput) { return this.post<ProjectMember>(`/projects/${projectId}/members`, input); }
+  updateSprintDates(id: number, start_date: string, end_date: string) { return this.patch<Sprint>(`/sprints/${id}/dates`, { start_date, end_date }); }
 }
 
 export const apiClient = new ApiClient();

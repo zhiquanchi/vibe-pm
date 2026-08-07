@@ -66,6 +66,21 @@ export interface SprintDetail {
   scope_changes?: ScopeChange[];
 }
 
+export interface Project {
+  id: number;
+  name: string;
+  description: string | null;
+  default_sprint_weeks?: number;
+}
+
+export interface ProjectMember {
+  id: string;
+  name: string;
+  email: string;
+  avatar_url?: string | null;
+  role: 'owner' | 'member';
+}
+
 export interface SprintStats {
   total_points: number;
   completed_points: number;
@@ -121,6 +136,19 @@ export interface ScopeChangeCreateInput {
   story_points?: StoryPoints;
   points_delta: number;
   reason?: string | null;
+}
+
+export interface ProjectUpdateInput {
+  name?: string;
+  description?: string | null;
+  default_sprint_weeks?: 1 | 2;
+}
+
+export interface MemberCreateInput {
+  user_id: string;
+  name: string;
+  email: string;
+  role?: 'owner' | 'member';
 }
 
 export interface ApiErrorShape {

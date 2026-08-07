@@ -21,6 +21,7 @@ export interface BurnupChartProps {
   /** Used when the first snapshot is missing an initial scope value. */
   initialPoints?: number;
   className?: string;
+  onSelectChange?: (change: ScopeChange) => void;
 }
 
 interface ChartPoint {
@@ -83,7 +84,7 @@ function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: 
   );
 }
 
-export function BurnupChart({ snapshots, scopeChanges = [], initialPoints, className = '' }: BurnupChartProps) {
+export function BurnupChart({ snapshots, scopeChanges = [], initialPoints, className = '', onSelectChange }: BurnupChartProps) {
   const [mode, setMode] = useState<ChartMode>('burnup');
   const points = useMemo(() => buildPoints(snapshots, initialPoints), [snapshots, initialPoints]);
   const latest = points[points.length - 1];
@@ -149,7 +150,7 @@ export function BurnupChart({ snapshots, scopeChanges = [], initialPoints, class
               <Line type="monotone" dataKey="remaining" name="剩余" stroke="#ef4444" strokeWidth={3} dot={false} />
               <Line type="monotone" dataKey="idealRemaining" name="理想剩余" stroke="#9ca3af" strokeDasharray="5 5" strokeWidth={1.5} dot={false} />
             </>}
-            {markers.map(({ change, point }) => <ReferenceDot key={change.id} x={point.label} y={mode === 'burnup' ? point.scope : point.remaining} r={5} fill={change.points_delta >= 0 ? '#ef4444' : '#22c55e'} stroke="#fff" strokeWidth={2} />)}
+            {markers.map(({ change, point }) => <ReferenceDot key={change.id} x={point.label} y={mode === 'burnup' ? point.scope : point.remaining} r={5} fill={change.points_delta >= 0 ? '#ef4444' : '#22c55e'} stroke="#fff" strokeWidth={2} onClick={() => onSelectChange?.(change)} aria-label={`查看范围变更：${change.description}`} />)}
           </ComposedChart>
         </ResponsiveContainer>
       </div>

@@ -16,6 +16,7 @@ export interface BoardProps {
   onCreateTask?: (input: TaskCreateInput) => Promise<unknown> | unknown;
   onEditTask?: (task: Task, input: TaskUpdateInput) => Promise<unknown> | unknown;
   onDeleteTask?: (task: Task) => Promise<unknown> | unknown;
+  onRemoveTask?: (task: Task) => Promise<unknown> | unknown;
   /** 用于拖拽状态更新，未提供时仍会更新组件内的临时状态。 */
   onStatusChange?: (task: Task, status: TaskStatus) => Promise<unknown> | unknown;
   projectId?: number;
@@ -33,6 +34,7 @@ export function Board({
   onCreateTask,
   onEditTask,
   onDeleteTask,
+  onRemoveTask,
   onStatusChange,
   projectId,
   sprintId,
@@ -139,7 +141,7 @@ export function Board({
             <div className="column" key={column.value}>
               <div className="column-head"><div><b>{column.label}</b><span>{columnTasks.length}</span></div><button className="icon-btn" type="button" title="新建任务" onClick={() => setShowCreate(true)}><Plus size={16} /></button></div>
               <div className="task-list" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { const id = Number(event.dataTransfer.getData('task-id')); const task = tasks.find((item) => item.id === id); if (task) void moveTask(task, column.value); }}>
-                {columnTasks.map((task) => <TaskCard key={task.id} task={task} disabled={disabled} onClick={() => { onTaskClick?.(task); setSelected(task); }} onDragStart={(event) => event.dataTransfer.setData('task-id', String(task.id))} />)}
+                {columnTasks.map((task) => <TaskCard key={task.id} task={task} disabled={disabled} onClick={() => { onTaskClick?.(task); setSelected(task); }} onEdit={() => setSelected(task)} onRemove={onRemoveTask ? () => void onRemoveTask(task) : undefined} onDelete={onDeleteTask ? () => void onDeleteTask(task) : undefined} onDragStart={(event) => event.dataTransfer.setData('task-id', String(task.id))} />)}
               </div>
             </div>
           );
@@ -164,8 +166,9 @@ export function Board({
   );
 }
 
-function TaskCard({ task, disabled, onClick, onDragStart }: { task: Task; disabled: boolean; onClick: () => void; onDragStart: (event: DragEvent<HTMLDivElement>) => void }) {
-  return <div className="task-card" draggable={!disabled} onDragStart={onDragStart} onClick={onClick} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onClick(); }}><div className="task-top"><span className={`priority p-${task.priority}`}>{task.priority}</span><MoreHorizontal size={15} aria-hidden="true" /></div><h3>{task.title}</h3><div className="task-bottom"><span className="points"><Zap size={12} />{task.story_points}</span><span className="tag">{task.assignee ?? '未分配'}</span></div></div>;
+function TaskCard({ task, disabled, onClick, onEdit, onRemove, onDelete, onDragStart }: { task: Task; disabled: boolean; onClick: () => void; onEdit: () => void; onRemove?: () => void; onDelete?: () => void; onDragStart: (event: DragEvent<HTMLDivElement>) => void }) {
+  const [menu, setMenu] = useState(false);
+  return <div className="task-card" draggable={!disabled} onDragStart={onDragStart} onClick={onClick} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onClick(); }}><div className="task-top"><span className={`priority p-${task.priority}`}>{task.priority}</span><button className="task-menu-trigger" type="button" title="任务操作" onClick={(event) => { event.stopPropagation(); setMenu(!menu); }}><MoreHorizontal size={15} /></button>{menu && <div className="task-menu" onClick={(event) => event.stopPropagation()}><button type="button" onClick={() => { setMenu(false); onEdit(); }}>编辑</button><button type="button" disabled={!onRemove} title={!onRemove ? '当前任务无法移出' : undefined} onClick={() => { setMenu(false); onRemove?.(); }}>移出 Sprint</button><button type="button" className="danger-action" disabled={!onDelete} onClick={() => { setMenu(false); onDelete?.(); }}>删除</button></div>}</div><h3>{task.title}</h3><div className="task-bottom"><span className="points"><Zap size={12} />{task.story_points}</span><span className="tag">{task.assignee ?? '未分配'}</span></div></div>;
 }
 
 export default Board;
