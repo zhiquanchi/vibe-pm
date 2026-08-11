@@ -1,124 +1,152 @@
 from __future__ import annotations
 
-import sqlite3
-from datetime import date, datetime
+from datetime import datetime
 
 from fastapi import HTTPException
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 from app.db.database import snapshot
-from app.services.common import rowdict
+from app.db.models import Project, ScopeChange, Sprint, Task
+from app.services.common import to_dict
 
 
 ALLOWED_TRANSITIONS = {"planning": {"planning", "active"}, "active": {"active", "completed"}, "completed": {"completed"}}
 
 
-def _sprint(conn: sqlite3.Connection, sprint_id: int) -> sqlite3.Row:
-    row = conn.execute("SELECT * FROM sprints WHERE id=?", (sprint_id,)).fetchone()
-    if not row:
+def _sprint(session: Session, sprint_id: int) -> Sprint:
+    sprint = session.get(Sprint, sprint_id)
+    if sprint is None:
         raise HTTPException(status_code=404, detail="Sprint not found")
-    return row
+    return sprint
 
 
-def _project_exists(conn: sqlite3.Connection, project_id: int) -> bool:
-    return conn.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone() is not None
+def _project_exists(session: Session, project_id: int) -> bool:
+    return session.get(Project, project_id) is not None
 
 
-def create_sprint(conn: sqlite3.Connection, payload) -> dict:
-    if not _project_exists(conn, payload.project_id):
+def create_sprint(session: Session, payload) -> dict:
+    if not _project_exists(session, payload.project_id):
         raise HTTPException(status_code=404, detail="Project not found")
     now = datetime.utcnow().isoformat()
-    cursor = conn.execute(
-        "INSERT INTO sprints(project_id,name,goal,start_date,end_date,status,initial_points,created_at) VALUES(?,?,?,?,?,?,0,?)",
-        (payload.project_id, payload.name, payload.goal, payload.start_date.isoformat(), payload.end_date.isoformat(), "planning", now),
+    sprint = Sprint(
+        project_id=payload.project_id,
+        name=payload.name,
+        goal=payload.goal,
+        start_date=payload.start_date.isoformat(),
+        end_date=payload.end_date.isoformat(),
+        status="planning",
+        initial_points=0,
+        created_at=now,
     )
-    conn.commit()
-    return rowdict(_sprint(conn, cursor.lastrowid))
+    session.add(sprint)
+    session.commit()
+    return to_dict(_sprint(session, sprint.id))
 
 
-def list_sprints(conn: sqlite3.Connection, project_id: int | None = None) -> list[dict]:
-    if project_id is None:
-        rows = conn.execute("SELECT * FROM sprints ORDER BY start_date DESC,id DESC")
-    else:
-        rows = conn.execute("SELECT * FROM sprints WHERE project_id=? ORDER BY start_date DESC,id DESC", (project_id,))
-    return [rowdict(row) for row in rows]
+def list_sprints(session: Session, project_id: int | None = None) -> list[dict]:
+    stmt = select(Sprint).order_by(Sprint.start_date.desc(), Sprint.id.desc())
+    if project_id is not None:
+        stmt = stmt.where(Sprint.project_id == project_id)
+    return [to_dict(sprint) for sprint in session.scalars(stmt)]
 
 
-def sprint_detail(conn: sqlite3.Connection, sprint_id: int) -> dict:
-    sprint = _sprint(conn, sprint_id)
-    tasks = conn.execute("SELECT * FROM tasks WHERE sprint_id=? ORDER BY position,id", (sprint_id,))
-    return {"sprint": rowdict(sprint), "tasks": [rowdict(row) for row in tasks]}
+def sprint_detail(session: Session, sprint_id: int) -> dict:
+    sprint = _sprint(session, sprint_id)
+    tasks = session.scalars(select(Task).where(Task.sprint_id == sprint_id).order_by(Task.position, Task.id))
+    return {"sprint": to_dict(sprint), "tasks": [to_dict(task) for task in tasks]}
 
 
-def _stats(conn: sqlite3.Connection, sprint_id: int) -> dict:
-    rows = conn.execute("SELECT status,story_points FROM tasks WHERE sprint_id=?", (sprint_id,))
+def _stats(session: Session, sprint_id: int) -> dict:
+    rows = session.execute(select(Task.status, Task.story_points).where(Task.sprint_id == sprint_id))
     total = completed = 0.0
     count = completed_count = 0
-    for row in rows:
-        points = float(row["story_points"])
+    for status, points in rows:
+        points = float(points)
         total += points
         count += 1
-        if row["status"] == "done":
+        if status == "done":
             completed += points
             completed_count += 1
     return {"total_points": total, "completed_points": completed, "remaining_points": total - completed, "completion_rate": (completed / total if total else 0), "task_count": count, "completed_task_count": completed_count}
 
 
-def update_status(conn: sqlite3.Connection, sprint_id: int, target: str) -> dict:
-    sprint = _sprint(conn, sprint_id)
-    current = sprint["status"]
+def update_status(session: Session, sprint_id: int, target: str) -> dict:
+    sprint = _sprint(session, sprint_id)
+    current = sprint.status
     if target not in ALLOWED_TRANSITIONS.get(current, set()):
         raise HTTPException(status_code=409, detail=f"Invalid sprint transition: {current} -> {target}")
     if target == current:
-        return {"sprint": rowdict(sprint), "stats": _stats(conn, sprint_id) if target == "completed" else None}
+        return {"sprint": to_dict(sprint), "stats": _stats(session, sprint_id) if target == "completed" else None}
 
     if target == "active":
-        active = conn.execute("SELECT id FROM sprints WHERE project_id=? AND status='active' AND id<>? LIMIT 1", (sprint["project_id"], sprint_id)).fetchone()
-        if active:
+        active_id = session.scalars(
+            select(Sprint.id).where(Sprint.project_id == sprint.project_id, Sprint.status == "active", Sprint.id != sprint_id).limit(1)
+        ).first()
+        if active_id is not None:
             raise HTTPException(status_code=409, detail="Project already has an active sprint")
-        points = conn.execute("SELECT COALESCE(SUM(story_points),0) FROM tasks WHERE sprint_id=?", (sprint_id,)).fetchone()[0]
-        conn.execute("UPDATE sprints SET status='active',initial_points=? WHERE id=?", (points, sprint_id))
-        snapshot(conn, sprint_id)
-        conn.commit()
-        return {"sprint": rowdict(_sprint(conn, sprint_id)), "stats": None}
+        points = session.scalar(select(func.coalesce(func.sum(Task.story_points), 0)).where(Task.sprint_id == sprint_id))
+        sprint.status = "active"
+        sprint.initial_points = points
+        snapshot(session, sprint_id)
+        session.commit()
+        return {"sprint": to_dict(_sprint(session, sprint_id)), "stats": None}
 
     # Completing a sprint is one transaction: calculate first, then return unfinished work to backlog.
-    stats = _stats(conn, sprint_id)
-    conn.execute("UPDATE tasks SET sprint_id=NULL,updated_at=? WHERE sprint_id=? AND status<>'done'", (datetime.utcnow().isoformat(), sprint_id))
-    conn.execute("UPDATE sprints SET status='completed' WHERE id=?", (sprint_id,))
-    conn.commit()
-    return {"sprint": rowdict(_sprint(conn, sprint_id)), "stats": stats}
+    stats = _stats(session, sprint_id)
+    now = datetime.utcnow().isoformat()
+    for task in session.scalars(select(Task).where(Task.sprint_id == sprint_id, Task.status != "done")):
+        task.sprint_id = None
+        task.updated_at = now
+    sprint.status = "completed"
+    session.commit()
+    return {"sprint": to_dict(_sprint(session, sprint_id)), "stats": stats}
 
 
-def list_backlog(conn: sqlite3.Connection, project_id: int) -> list[dict]:
-    if not _project_exists(conn, project_id):
+def list_backlog(session: Session, project_id: int) -> list[dict]:
+    if not _project_exists(session, project_id):
         raise HTTPException(status_code=404, detail="Project not found")
-    rows = conn.execute("SELECT * FROM tasks WHERE project_id=? AND sprint_id IS NULL ORDER BY position,id", (project_id,))
-    return [rowdict(row) for row in rows]
+    tasks = session.scalars(select(Task).where(Task.project_id == project_id, Task.sprint_id.is_(None)).order_by(Task.position, Task.id))
+    return [to_dict(task) for task in tasks]
 
 
-def move_task(conn: sqlite3.Connection, sprint_id: int, task_id: int, into: bool, reason: str | None = None) -> dict:
-    sprint = _sprint(conn, sprint_id)
-    if sprint["status"] == "completed":
+def move_task(session: Session, sprint_id: int, task_id: int, into: bool, reason: str | None = None) -> dict:
+    sprint = _sprint(session, sprint_id)
+    if sprint.status == "completed":
         raise HTTPException(status_code=409, detail="已完成 Sprint 为只读状态")
-    task = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
-    if not task:
+    task = session.get(Task, task_id)
+    if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
-    if task["project_id"] != sprint["project_id"]:
+    if task.project_id != sprint.project_id:
         raise HTTPException(status_code=422, detail="Task and sprint belong to different projects")
+    now = datetime.utcnow().isoformat()
     if into:
-        if task["sprint_id"] is not None:
+        if task.sprint_id is not None:
             raise HTTPException(status_code=409, detail="Task is already in a sprint")
-        conn.execute("UPDATE tasks SET sprint_id=?,updated_at=? WHERE id=?", (sprint_id, datetime.utcnow().isoformat(), task_id))
-        delta, kind = task["story_points"], "add_task"
-        description = f"Added task: {task['title']}"
+        task.sprint_id = sprint_id
+        task.updated_at = now
+        delta, kind = task.story_points, "add_task"
+        description = f"Added task: {task.title}"
     else:
-        if task["sprint_id"] != sprint_id:
+        if task.sprint_id != sprint_id:
             raise HTTPException(status_code=409, detail="Task is not in this sprint")
-        conn.execute("UPDATE tasks SET sprint_id=NULL,updated_at=? WHERE id=?", (datetime.utcnow().isoformat(), task_id))
-        delta, kind = -task["story_points"], "remove_task"
-        description = f"Removed task: {task['title']}"
-    if sprint["status"] == "active":
-        conn.execute("INSERT INTO scope_changes(sprint_id,task_id,type,description,points_delta,reason,created_by,created_at) VALUES(?,?,?,?,?,?,?,?)", (sprint_id, task_id, kind, description, delta, reason, "current-user", datetime.utcnow().isoformat()))
-        snapshot(conn, sprint_id)
-    conn.commit()
-    return rowdict(conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone())
+        task.sprint_id = None
+        task.updated_at = now
+        delta, kind = -task.story_points, "remove_task"
+        description = f"Removed task: {task.title}"
+    if sprint.status == "active":
+        session.add(
+            ScopeChange(
+                sprint_id=sprint_id,
+                task_id=task_id,
+                type=kind,
+                description=description,
+                points_delta=delta,
+                reason=reason,
+                created_by="current-user",
+                created_at=now,
+            )
+        )
+        snapshot(session, sprint_id)
+    session.commit()
+    return to_dict(session.get(Task, task_id))

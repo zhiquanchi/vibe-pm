@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import sqlite3
-
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
-from app.db.database import get_connection, init_db
+from app.db.database import get_session, init_db
+from app.db.models import Project, ScopeChange, Sprint
 from app.routers.tasks import router
 
 
@@ -14,12 +14,12 @@ from app.routers.tasks import router
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("VIBE_PM_DB_PATH", str(tmp_path / "tasks.db"))
     init_db(seed=False)
-    conn = get_connection()
-    conn.execute("INSERT INTO projects(id,name,created_at) VALUES(1,'测试项目','now')")
-    conn.execute("INSERT INTO sprints(id,project_id,name,start_date,end_date,status,created_at) VALUES(1,1,'进行中','2026-01-01','2026-01-14','active','now')")
-    conn.execute("INSERT INTO sprints(id,project_id,name,start_date,end_date,status,created_at) VALUES(2,1,'规划中','2026-02-01','2026-02-14','planning','now')")
-    conn.commit()
-    conn.close()
+    session = get_session()
+    session.add(Project(id=1, name="测试项目", created_at="now"))
+    session.add(Sprint(id=1, project_id=1, name="进行中", start_date="2026-01-01", end_date="2026-01-14", status="active", created_at="now"))
+    session.add(Sprint(id=2, project_id=1, name="规划中", start_date="2026-02-01", end_date="2026-02-14", status="planning", created_at="now"))
+    session.commit()
+    session.close()
     api = FastAPI()
     api.include_router(router)
     return TestClient(api)
@@ -46,9 +46,11 @@ def test_active_sprint_scope_changes_are_logged_and_positions_are_ordered(client
     moved = client.patch(f"/api/tasks/{first['id']}", json={"sprint_id": None, "reason": "延期"})
     assert moved.status_code == 200
 
-    conn = get_connection()
-    changes = conn.execute("SELECT type,points_delta,reason FROM scope_changes WHERE sprint_id=1 ORDER BY id").fetchall()
-    conn.close()
+    session = get_session()
+    changes = session.execute(
+        select(ScopeChange.type, ScopeChange.points_delta, ScopeChange.reason).where(ScopeChange.sprint_id == 1).order_by(ScopeChange.id)
+    ).all()
+    session.close()
     assert [(row[0], row[1], row[2]) for row in changes] == [
         ("add_task", 5.0, None),
         ("add_task", 2.0, None),
@@ -63,7 +65,9 @@ def test_status_flow_and_delete_from_active_sprint_is_logged(client):
         response = client.patch(f"/api/tasks/{task['id']}", json={"status": status})
         assert response.status_code == 200
     assert client.delete(f"/api/tasks/{task['id']}?reason=取消").json() == {"deleted": True}
-    conn = get_connection()
-    last = conn.execute("SELECT type,points_delta,reason FROM scope_changes WHERE task_id=? ORDER BY id DESC LIMIT 1", (task["id"],)).fetchone()
-    conn.close()
+    session = get_session()
+    last = session.execute(
+        select(ScopeChange.type, ScopeChange.points_delta, ScopeChange.reason).where(ScopeChange.task_id == task["id"]).order_by(ScopeChange.id.desc()).limit(1)
+    ).first()
+    session.close()
     assert tuple(last) == ("remove_task", -1.0, "取消")

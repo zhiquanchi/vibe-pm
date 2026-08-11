@@ -3,8 +3,10 @@ from datetime import date, timedelta
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import func, select
 
-from app.db.database import get_connection, init_db
+from app.db.database import get_session, init_db
+from app.db.models import Project, ScopeChange, Sprint, SprintSnapshot, Task
 from app.routers.scope_changes import router
 
 
@@ -12,16 +14,15 @@ from app.routers.scope_changes import router
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("VIBE_PM_DB_PATH", str(tmp_path / "scope.sqlite"))
     init_db(seed=False)
-    conn = get_connection()
+    session = get_session()
     start = date.today() - timedelta(days=2)
-    conn.execute("INSERT INTO projects(id,name,created_at) VALUES(1,'项目','now')")
-    conn.execute(
-        "INSERT INTO sprints(id,project_id,name,start_date,end_date,status,initial_points,created_at) VALUES(1,1,'Sprint',?,?,'active',10,'now')",
-        (start.isoformat(), (start + timedelta(days=13)).isoformat()),
+    session.add(Project(id=1, name="项目", created_at="now"))
+    session.add(
+        Sprint(id=1, project_id=1, name="Sprint", start_date=start.isoformat(), end_date=(start + timedelta(days=13)).isoformat(), status="active", initial_points=10, created_at="now")
     )
-    conn.execute("INSERT INTO tasks(id,project_id,sprint_id,title,status,story_points,created_at,updated_at) VALUES(1,1,1,'原任务','todo',10,'now','now')")
-    conn.commit()
-    conn.close()
+    session.add(Task(id=1, project_id=1, sprint_id=1, title="原任务", status="todo", story_points=10, created_at="now", updated_at="now"))
+    session.commit()
+    session.close()
     app = FastAPI()
     app.include_router(router)
     return TestClient(app)
@@ -46,18 +47,22 @@ def test_add_remove_change_points_and_capacity_warning(client):
 
 
 def test_snapshot_generation_is_idempotent_and_preserves_history(client):
-    conn = get_connection()
+    session = get_session()
     yesterday = (date.today() - timedelta(days=1)).isoformat()
-    conn.execute("INSERT INTO sprint_snapshots(sprint_id,snapshot_date,total_scope,completed_points,remaining_points,ideal_completed,ideal_remaining) VALUES(1,?,?, ?,?,?,?)", (yesterday, 99, 1, 98, 2, 8))
-    conn.commit()
-    conn.close()
+    session.add(SprintSnapshot(sprint_id=1, snapshot_date=yesterday, total_scope=99, completed_points=1, remaining_points=98, ideal_completed=2, ideal_remaining=8))
+    session.commit()
+    session.close()
     first = client.post('/api/sprints/1/snapshots/generate').json()
     second = client.post('/api/sprints/1/snapshots/generate').json()
     assert first['id'] == second['id']
-    conn = get_connection()
-    old = conn.execute("SELECT total_scope,completed_points FROM sprint_snapshots WHERE sprint_id=1 AND snapshot_date=?", (yesterday,)).fetchone()
-    count = conn.execute("SELECT COUNT(*) FROM sprint_snapshots WHERE sprint_id=1 AND snapshot_date=?", (date.today().isoformat(),)).fetchone()[0]
-    conn.close()
+    session = get_session()
+    old = session.execute(
+        select(SprintSnapshot.total_scope, SprintSnapshot.completed_points).where(SprintSnapshot.sprint_id == 1, SprintSnapshot.snapshot_date == yesterday)
+    ).first()
+    count = session.scalar(
+        select(func.count()).select_from(SprintSnapshot).where(SprintSnapshot.sprint_id == 1, SprintSnapshot.snapshot_date == date.today().isoformat())
+    )
+    session.close()
     assert tuple(old) == (99.0, 1.0)
     assert count == 1
 
@@ -70,10 +75,11 @@ def test_scope_transaction_rolls_back_task_and_log_when_snapshot_fails(client, m
         raise RuntimeError('snapshot failure')
 
     monkeypatch.setattr(service, 'snapshot', fail_snapshot)
-    conn = get_connection()
+    session = get_session()
     with pytest.raises(RuntimeError):
-        service.apply_scope_change(conn, 1, ScopeChangeCommand(type='add_task', title='必须回滚', story_points=3))
-    conn = get_connection()
-    assert conn.execute("SELECT COUNT(*) FROM tasks WHERE title='必须回滚'").fetchone()[0] == 0
-    assert conn.execute("SELECT COUNT(*) FROM scope_changes").fetchone()[0] == 0
-    conn.close()
+        service.apply_scope_change(session, 1, ScopeChangeCommand(type='add_task', title='必须回滚', story_points=3))
+    session.close()
+    session = get_session()
+    assert session.scalar(select(func.count()).select_from(Task).where(Task.title == '必须回滚')) == 0
+    assert session.scalar(select(func.count()).select_from(ScopeChange)) == 0
+    session.close()

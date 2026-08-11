@@ -3,134 +3,103 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.orm import Session
 
 from app.core.identity import current_user_id
-from app.db.database import get_connection
+from app.db.database import get_db
+from app.db.models import Profile, Project, ProjectMember
 from app.schemas.projects import MemberCreate, ProjectCreate, ProjectUpdate
-from app.services.common import rowdict
+from app.services.common import to_dict
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
 
-def _project_or_404(conn, project_id: int):
-    project = conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
-    if not project:
+def _project_or_404(session: Session, project_id: int) -> Project:
+    project = session.get(Project, project_id)
+    if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
     return project
 
 
-def require_project_member(project_id: int, user_id: str = Depends(current_user_id)) -> str:
-    conn = get_connection()
-    try:
-        _project_or_404(conn, project_id)
-        member = conn.execute(
-            "SELECT 1 FROM project_members WHERE project_id=? AND user_id=?",
-            (project_id, user_id),
-        ).fetchone()
-        if not member:
-            raise HTTPException(status_code=403, detail="Project membership required")
-        return user_id
-    finally:
-        conn.close()
+def _member_rows(session: Session, project_id: int, order_by):
+    stmt = (
+        select(Profile.id, Profile.name, Profile.email, Profile.avatar_url, ProjectMember.role)
+        .join_from(ProjectMember, Profile, Profile.id == ProjectMember.user_id)
+        .where(ProjectMember.project_id == project_id)
+        .order_by(*order_by)
+    )
+    return [dict(row) for row in session.execute(stmt).mappings()]
+
+
+def require_project_member(project_id: int, user_id: str = Depends(current_user_id), session: Session = Depends(get_db)) -> str:
+    _project_or_404(session, project_id)
+    if session.get(ProjectMember, (project_id, user_id)) is None:
+        raise HTTPException(status_code=403, detail="Project membership required")
+    return user_id
 
 
 @router.post("")
-def create_project(payload: ProjectCreate, user_id: str = Depends(current_user_id)):
-    conn = get_connection()
-    try:
-        now = datetime.utcnow().isoformat()
-        # Development identities are provisioned on first use.
-        conn.execute(
-            "INSERT OR IGNORE INTO profiles(id,name,email,created_at) VALUES(?,?,?,?)",
-            (user_id, user_id, f"{user_id}@local.invalid", now),
-        )
-        cursor = conn.execute(
-            "INSERT INTO projects(name,description,created_at) VALUES(?,?,?)",
-            (payload.name, payload.description, now),
-        )
-        project_id = cursor.lastrowid
-        conn.execute(
-            "INSERT INTO project_members(project_id,user_id,role) VALUES(?,?,?)",
-            (project_id, user_id, "owner"),
-        )
-        conn.commit()
-        return rowdict(conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone())
-    finally:
-        conn.close()
+def create_project(payload: ProjectCreate, user_id: str = Depends(current_user_id), session: Session = Depends(get_db)):
+    now = datetime.utcnow().isoformat()
+    # Development identities are provisioned on first use.
+    if session.get(Profile, user_id) is None:
+        session.add(Profile(id=user_id, name=user_id, email=f"{user_id}@local.invalid", created_at=now))
+    project = Project(name=payload.name, description=payload.description, created_at=now)
+    session.add(project)
+    session.flush()
+    session.add(ProjectMember(project_id=project.id, user_id=user_id, role="owner"))
+    session.commit()
+    return to_dict(session.get(Project, project.id))
 
 
 @router.get("/{project_id}")
-def project_detail(project_id: int, _user_id: str = Depends(require_project_member)):
-    conn = get_connection()
-    try:
-        project = _project_or_404(conn, project_id)
-        members = conn.execute(
-            "SELECT p.id,p.name,p.email,p.avatar_url,pm.role FROM project_members pm JOIN profiles p ON p.id=pm.user_id WHERE pm.project_id=? ORDER BY pm.role,p.name",
-            (project_id,),
-        )
-        return {"project": rowdict(project), "members": [rowdict(row) for row in members]}
-    finally:
-        conn.close()
+def project_detail(project_id: int, _user_id: str = Depends(require_project_member), session: Session = Depends(get_db)):
+    project = _project_or_404(session, project_id)
+    members = _member_rows(session, project_id, (ProjectMember.role, Profile.name))
+    return {"project": to_dict(project), "members": members}
 
 
 @router.get("/{project_id}/members")
-def list_members(project_id: int, _user_id: str = Depends(require_project_member)):
-    conn = get_connection()
-    try:
-        _project_or_404(conn, project_id)
-        rows = conn.execute(
-            "SELECT p.id,p.name,p.email,p.avatar_url,pm.role FROM project_members pm JOIN profiles p ON p.id=pm.user_id WHERE pm.project_id=? ORDER BY p.name",
-            (project_id,),
-        )
-        return [rowdict(row) for row in rows]
-    finally:
-        conn.close()
+def list_members(project_id: int, _user_id: str = Depends(require_project_member), session: Session = Depends(get_db)):
+    _project_or_404(session, project_id)
+    return _member_rows(session, project_id, (Profile.name,))
 
 
 @router.post("/{project_id}/members")
-def add_member(project_id: int, payload: MemberCreate, _user_id: str = Depends(require_project_member)):
+def add_member(project_id: int, payload: MemberCreate, _user_id: str = Depends(require_project_member), session: Session = Depends(get_db)):
     if payload.role not in {"owner", "member"}:
         raise HTTPException(status_code=422, detail="Invalid member role")
-    conn = get_connection()
-    try:
-        _project_or_404(conn, project_id)
-        owner = conn.execute("SELECT role FROM project_members WHERE project_id=? AND user_id=?", (project_id, _user_id)).fetchone()
-        if not owner or owner[0] != "owner":
-            raise HTTPException(status_code=403, detail="只有项目 Owner 可以添加成员")
-        if conn.execute("SELECT 1 FROM project_members WHERE project_id=? AND user_id=?", (project_id, payload.user_id)).fetchone():
-            raise HTTPException(status_code=409, detail="该成员已经在项目中")
-        now = datetime.utcnow().isoformat()
-        conn.execute(
-            "INSERT INTO profiles(id,name,email,created_at) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,email=excluded.email",
-            (payload.user_id, payload.name, payload.email, now),
-        )
-        conn.execute(
-            "INSERT INTO project_members(project_id,user_id,role) VALUES(?,?,?) ON CONFLICT(project_id,user_id) DO UPDATE SET role=excluded.role",
-            (project_id, payload.user_id, payload.role),
-        )
-        conn.commit()
-        row = conn.execute(
-            "SELECT p.id,p.name,p.email,p.avatar_url,pm.role FROM project_members pm JOIN profiles p ON p.id=pm.user_id WHERE pm.project_id=? AND pm.user_id=?",
-            (project_id, payload.user_id),
-        ).fetchone()
-        return rowdict(row)
-    finally:
-        conn.close()
+    _project_or_404(session, project_id)
+    owner = session.get(ProjectMember, (project_id, _user_id))
+    if owner is None or owner.role != "owner":
+        raise HTTPException(status_code=403, detail="只有项目 Owner 可以添加成员")
+    if session.get(ProjectMember, (project_id, payload.user_id)) is not None:
+        raise HTTPException(status_code=409, detail="该成员已经在项目中")
+    now = datetime.utcnow().isoformat()
+    profile_stmt = sqlite_insert(Profile).values(id=payload.user_id, name=payload.name, email=payload.email, created_at=now)
+    session.execute(profile_stmt.on_conflict_do_update(index_elements=[Profile.id], set_={"name": profile_stmt.excluded.name, "email": profile_stmt.excluded.email}))
+    member_stmt = sqlite_insert(ProjectMember).values(project_id=project_id, user_id=payload.user_id, role=payload.role)
+    session.execute(member_stmt.on_conflict_do_update(index_elements=[ProjectMember.project_id, ProjectMember.user_id], set_={"role": member_stmt.excluded.role}))
+    session.commit()
+    row = session.execute(
+        select(Profile.id, Profile.name, Profile.email, Profile.avatar_url, ProjectMember.role)
+        .join_from(ProjectMember, Profile, Profile.id == ProjectMember.user_id)
+        .where(ProjectMember.project_id == project_id, ProjectMember.user_id == payload.user_id)
+    ).mappings().first()
+    return dict(row)
 
 
 @router.patch("/{project_id}")
-def update_project(project_id: int, payload: ProjectUpdate, user_id: str = Depends(require_project_member)):
-    conn = get_connection()
-    try:
-        _project_or_404(conn, project_id)
-        role = conn.execute("SELECT role FROM project_members WHERE project_id=? AND user_id=?", (project_id, user_id)).fetchone()
-        if not role or role[0] != "owner":
-            raise HTTPException(status_code=403, detail="只有项目 Owner 可以修改设置")
-        data = payload.model_dump(exclude_none=True)
-        if data:
-            values = list(data.values()) + [project_id]
-            conn.execute(f"UPDATE projects SET {','.join(f'{key}=?' for key in data)} WHERE id=?", values)
-            conn.commit()
-        return rowdict(conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone())
-    finally:
-        conn.close()
+def update_project(project_id: int, payload: ProjectUpdate, user_id: str = Depends(require_project_member), session: Session = Depends(get_db)):
+    project = _project_or_404(session, project_id)
+    member = session.get(ProjectMember, (project_id, user_id))
+    if member is None or member.role != "owner":
+        raise HTTPException(status_code=403, detail="只有项目 Owner 可以修改设置")
+    data = payload.model_dump(exclude_none=True)
+    if data:
+        for key, value in data.items():
+            setattr(project, key, value)
+        session.commit()
+    return to_dict(session.get(Project, project_id))

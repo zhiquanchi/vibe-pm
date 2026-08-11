@@ -4,7 +4,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.db.database import get_connection, init_db
+from app.db.database import get_session, init_db
+from app.db.models import Project, Task
 from app.routers.sprint_backlog import router
 
 
@@ -12,13 +13,13 @@ from app.routers.sprint_backlog import router
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("VIBE_PM_DB_PATH", str(tmp_path / "sprint.sqlite"))
     init_db(seed=False)
-    conn = get_connection()
-    conn.execute("INSERT INTO projects(id,name,created_at) VALUES(1,'Demo','now')")
-    conn.execute("INSERT INTO tasks(project_id,title,status,story_points,created_at,updated_at) VALUES(1,'Done task','done',3,'now','now')")
-    conn.execute("INSERT INTO tasks(project_id,title,status,story_points,created_at,updated_at) VALUES(1,'Todo task','todo',5,'now','now')")
-    conn.execute("INSERT INTO tasks(project_id,title,status,story_points,created_at,updated_at) VALUES(1,'Backlog task','todo',2,'now','now')")
-    conn.commit()
-    conn.close()
+    session = get_session()
+    session.add(Project(id=1, name="Demo", created_at="now"))
+    session.add(Task(project_id=1, title="Done task", status="done", story_points=3, created_at="now", updated_at="now"))
+    session.add(Task(project_id=1, title="Todo task", status="todo", story_points=5, created_at="now", updated_at="now"))
+    session.add(Task(project_id=1, title="Backlog task", status="todo", story_points=2, created_at="now", updated_at="now"))
+    session.commit()
+    session.close()
     app = FastAPI()
     app.include_router(router)
     return TestClient(app)

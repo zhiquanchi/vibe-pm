@@ -3,11 +3,14 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.core.identity import current_user_id
-from app.db.database import get_connection, snapshot
+from app.db.database import get_db, snapshot
+from app.db.models import ScopeChange, Sprint, SprintSnapshot, Task
 from app.schemas import ScopeChangeCreate, SprintCreate, TaskCreate, TaskUpdate
-from app.services.common import rowdict
+from app.services.common import to_dict
 
 router = APIRouter(prefix="/api")
 
@@ -18,146 +21,137 @@ def health():
 
 
 @router.get("/sprints")
-def sprints():
-    conn = get_connection()
-    try:
-        return [rowdict(row) for row in conn.execute("SELECT * FROM sprints ORDER BY start_date DESC")]
-    finally:
-        conn.close()
+def sprints(session: Session = Depends(get_db)):
+    return [to_dict(sprint) for sprint in session.scalars(select(Sprint).order_by(Sprint.start_date.desc()))]
 
 
 @router.post("/sprints")
-def create_sprint(payload: SprintCreate):
-    conn = get_connection()
-    try:
-        now = datetime.utcnow().isoformat()
-        cursor = conn.execute(
-            "INSERT INTO sprints(project_id,name,goal,start_date,end_date,created_at) VALUES(?,?,?,?,?,?)",
-            (1, payload.name, payload.goal, payload.start_date.isoformat(), payload.end_date.isoformat(), now),
-        )
-        conn.commit()
-        return rowdict(conn.execute("SELECT * FROM sprints WHERE id=?", (cursor.lastrowid,)).fetchone())
-    finally:
-        conn.close()
+def create_sprint(payload: SprintCreate, session: Session = Depends(get_db)):
+    now = datetime.utcnow().isoformat()
+    sprint = Sprint(
+        project_id=1,
+        name=payload.name,
+        goal=payload.goal,
+        start_date=payload.start_date.isoformat(),
+        end_date=payload.end_date.isoformat(),
+        created_at=now,
+    )
+    session.add(sprint)
+    session.commit()
+    return to_dict(session.get(Sprint, sprint.id))
 
 
 @router.get("/sprints/{sprint_id}")
-def sprint(sprint_id: int):
-    conn = get_connection()
-    try:
-        sprint_row = conn.execute("SELECT * FROM sprints WHERE id=?", (sprint_id,)).fetchone()
-        if not sprint_row:
-            raise HTTPException(404, "Sprint not found")
-        tasks = conn.execute("SELECT * FROM tasks WHERE sprint_id=? ORDER BY position,id", (sprint_id,))
-        changes = conn.execute("SELECT * FROM scope_changes WHERE sprint_id=? ORDER BY created_at DESC", (sprint_id,))
-        return {"sprint": rowdict(sprint_row), "tasks": [rowdict(row) for row in tasks], "scope_changes": [rowdict(row) for row in changes]}
-    finally:
-        conn.close()
+def sprint(sprint_id: int, session: Session = Depends(get_db)):
+    sprint_row = session.get(Sprint, sprint_id)
+    if sprint_row is None:
+        raise HTTPException(404, "Sprint not found")
+    tasks = session.scalars(select(Task).where(Task.sprint_id == sprint_id).order_by(Task.position, Task.id))
+    changes = session.scalars(select(ScopeChange).where(ScopeChange.sprint_id == sprint_id).order_by(ScopeChange.created_at.desc()))
+    return {"sprint": to_dict(sprint_row), "tasks": [to_dict(row) for row in tasks], "scope_changes": [to_dict(row) for row in changes]}
 
 
 @router.get("/tasks")
-def tasks(sprint_id: int | None = None):
-    conn = get_connection()
-    try:
-        if sprint_id is None:
-            rows = conn.execute("SELECT * FROM tasks ORDER BY position,id")
-        else:
-            rows = conn.execute("SELECT * FROM tasks WHERE sprint_id=? ORDER BY position,id", (sprint_id,))
-        return [rowdict(row) for row in rows]
-    finally:
-        conn.close()
+def tasks(sprint_id: int | None = None, session: Session = Depends(get_db)):
+    stmt = select(Task).order_by(Task.position, Task.id)
+    if sprint_id is not None:
+        stmt = stmt.where(Task.sprint_id == sprint_id)
+    return [to_dict(task) for task in session.scalars(stmt)]
 
 
 @router.post("/tasks")
-def create_task(payload: TaskCreate):
-    conn = get_connection()
-    try:
-        now = datetime.utcnow().isoformat()
-        cursor = conn.execute(
-            "INSERT INTO tasks(project_id,sprint_id,title,description,status,story_points,priority,assignee,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-            (payload.project_id, payload.sprint_id, payload.title, payload.description, payload.status, payload.story_points, payload.priority, payload.assignee, now, now),
-        )
-        if payload.sprint_id:
-            snapshot(conn, payload.sprint_id)
-        conn.commit()
-        return rowdict(conn.execute("SELECT * FROM tasks WHERE id=?", (cursor.lastrowid,)).fetchone())
-    finally:
-        conn.close()
+def create_task(payload: TaskCreate, session: Session = Depends(get_db)):
+    now = datetime.utcnow().isoformat()
+    task = Task(
+        project_id=payload.project_id,
+        sprint_id=payload.sprint_id,
+        title=payload.title,
+        description=payload.description,
+        status=payload.status,
+        story_points=payload.story_points,
+        priority=payload.priority,
+        assignee=payload.assignee,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(task)
+    session.flush()
+    if payload.sprint_id:
+        snapshot(session, payload.sprint_id)
+    session.commit()
+    return to_dict(session.get(Task, task.id))
 
 
 @router.patch("/tasks/{task_id}")
-def update_task(task_id: int, payload: TaskUpdate, user_id: str = Depends(current_user_id)):
-    conn = get_connection()
-    try:
-        task = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
-        if not task:
-            raise HTTPException(404, "Task not found")
-        data = payload.model_dump(exclude_none=True)
-        fields = [f"{key}=?" for key in data]
-        values = list(data.values())
-        if fields:
-            values.extend([datetime.utcnow().isoformat(), task_id])
-            conn.execute(f"UPDATE tasks SET {','.join(fields)},updated_at=? WHERE id=?", values)
-        if "story_points" in data and data["story_points"] != task["story_points"] and task["sprint_id"]:
-            conn.execute(
-                "INSERT INTO scope_changes(sprint_id,task_id,type,description,points_delta,created_by,created_at) VALUES(?,?,?,?,?,?,?)",
-                (task["sprint_id"], task_id, "change_points", f"Changed points for {task['title']}", data["story_points"] - task["story_points"], user_id, datetime.utcnow().isoformat()),
+def update_task(task_id: int, payload: TaskUpdate, user_id: str = Depends(current_user_id), session: Session = Depends(get_db)):
+    task = session.get(Task, task_id)
+    if task is None:
+        raise HTTPException(404, "Task not found")
+    old_title = task.title
+    old_points = task.story_points
+    old_sprint = task.sprint_id
+    data = payload.model_dump(exclude_none=True)
+    if data:
+        for key, value in data.items():
+            setattr(task, key, value)
+        task.updated_at = datetime.utcnow().isoformat()
+    if "story_points" in data and data["story_points"] != old_points and old_sprint:
+        session.add(
+            ScopeChange(
+                sprint_id=old_sprint,
+                task_id=task_id,
+                type="change_points",
+                description=f"Changed points for {old_title}",
+                points_delta=data["story_points"] - old_points,
+                created_by=user_id,
+                created_at=datetime.utcnow().isoformat(),
             )
-        if task["sprint_id"]:
-            snapshot(conn, task["sprint_id"])
-        conn.commit()
-        return rowdict(conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone())
-    finally:
-        conn.close()
+        )
+    if old_sprint:
+        snapshot(session, old_sprint)
+    session.commit()
+    return to_dict(session.get(Task, task_id))
 
 
 @router.delete("/tasks/{task_id}")
-def delete_task(task_id: int):
-    conn = get_connection()
-    try:
-        task = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
-        if not task:
-            raise HTTPException(404, "Task not found")
-        conn.execute("DELETE FROM tasks WHERE id=?", (task_id,))
-        conn.commit()
-        return {"deleted": True}
-    finally:
-        conn.close()
+def delete_task(task_id: int, session: Session = Depends(get_db)):
+    task = session.get(Task, task_id)
+    if task is None:
+        raise HTTPException(404, "Task not found")
+    session.delete(task)
+    session.commit()
+    return {"deleted": True}
 
 
 @router.get("/sprints/{sprint_id}/scope-changes")
-def scope_changes(sprint_id: int):
-    conn = get_connection()
-    try:
-        rows = conn.execute("SELECT * FROM scope_changes WHERE sprint_id=? ORDER BY created_at DESC", (sprint_id,))
-        return [rowdict(row) for row in rows]
-    finally:
-        conn.close()
+def scope_changes(sprint_id: int, session: Session = Depends(get_db)):
+    rows = session.scalars(select(ScopeChange).where(ScopeChange.sprint_id == sprint_id).order_by(ScopeChange.created_at.desc()))
+    return [to_dict(row) for row in rows]
 
 
 @router.post("/sprints/{sprint_id}/scope-changes")
-def create_scope_change(sprint_id: int, payload: ScopeChangeCreate, user_id: str = Depends(current_user_id)):
-    conn = get_connection()
-    try:
-        if not conn.execute("SELECT 1 FROM sprints WHERE id=?", (sprint_id,)).fetchone():
-            raise HTTPException(404, "Sprint not found")
-        now = datetime.utcnow().isoformat()
-        cursor = conn.execute(
-            "INSERT INTO scope_changes(sprint_id,task_id,type,description,points_delta,reason,created_by,created_at) VALUES(?,?,?,?,?,?,?,?)",
-            (sprint_id, payload.task_id, payload.type, payload.description, payload.points_delta, payload.reason, user_id, now),
-        )
-        snapshot(conn, sprint_id)
-        conn.commit()
-        return rowdict(conn.execute("SELECT * FROM scope_changes WHERE id=?", (cursor.lastrowid,)).fetchone())
-    finally:
-        conn.close()
+def create_scope_change(sprint_id: int, payload: ScopeChangeCreate, user_id: str = Depends(current_user_id), session: Session = Depends(get_db)):
+    if session.get(Sprint, sprint_id) is None:
+        raise HTTPException(404, "Sprint not found")
+    now = datetime.utcnow().isoformat()
+    change = ScopeChange(
+        sprint_id=sprint_id,
+        task_id=payload.task_id,
+        type=payload.type,
+        description=payload.description,
+        points_delta=payload.points_delta,
+        reason=payload.reason,
+        created_by=user_id,
+        created_at=now,
+    )
+    session.add(change)
+    session.flush()
+    snapshot(session, sprint_id)
+    session.commit()
+    return to_dict(session.get(ScopeChange, change.id))
 
 
 @router.get("/sprints/{sprint_id}/snapshots")
-def snapshots(sprint_id: int):
-    conn = get_connection()
-    try:
-        rows = conn.execute("SELECT * FROM sprint_snapshots WHERE sprint_id=? ORDER BY snapshot_date", (sprint_id,))
-        return [rowdict(row) for row in rows]
-    finally:
-        conn.close()
+def snapshots(sprint_id: int, session: Session = Depends(get_db)):
+    rows = session.scalars(select(SprintSnapshot).where(SprintSnapshot.sprint_id == sprint_id).order_by(SprintSnapshot.snapshot_date))
+    return [to_dict(row) for row in rows]
