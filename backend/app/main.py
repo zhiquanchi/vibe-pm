@@ -8,6 +8,7 @@ from app.db.database import init_db
 from app.routers.api import router
 from app.routers.projects import router as projects_router
 from app.routers.sprint_backlog import router as sprint_backlog_router
+from app.routers.stages import router as stages_router
 from app.routers.tasks import router as tasks_router
 from app.routers.scope_changes import router as scope_changes_router
 
@@ -29,6 +30,7 @@ app.add_middleware(
 # Domain routers are registered before the legacy compatibility router so the
 # persisted Sprint/task workflows are the canonical handlers.
 app.include_router(projects_router)
+app.include_router(stages_router)
 app.include_router(sprint_backlog_router)
 app.include_router(tasks_router)
 app.include_router(scope_changes_router)

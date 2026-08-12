@@ -11,6 +11,7 @@ from app.core.identity import current_user_id
 from app.db.database import get_db
 from app.db.models import Profile, Project, ProjectMember
 from app.schemas.projects import MemberCreate, ProjectCreate, ProjectUpdate
+from app.services import stages as stage_service
 from app.services.common import to_dict
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -50,6 +51,7 @@ def create_project(payload: ProjectCreate, user_id: str = Depends(current_user_i
     session.add(project)
     session.flush()
     session.add(ProjectMember(project_id=project.id, user_id=user_id, role="owner"))
+    stage_service.create_stages_for_project(session, project, payload.stages, user_id)
     session.commit()
     return to_dict(session.get(Project, project.id))
 

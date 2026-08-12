@@ -8,11 +8,15 @@ import type {
   SprintSnapshot,
   SprintStatus,
   SprintStatusResult,
+  Stage,
+  StageTemplateItem,
+  StageUpdateInput,
   Task,
   TaskCreateInput,
   TaskUpdateInput,
   MemberCreateInput,
   Project,
+  ProjectCreateInput,
   ProjectMember,
   ProjectUpdateInput,
 } from '../types';
@@ -74,6 +78,7 @@ export class ApiClient {
   get<T>(path: string, signal?: AbortSignal) { return this.request<T>(path, { method: 'GET', signal }); }
   post<T>(path: string, payload: unknown) { return this.request<T>(path, { method: 'POST', body: JSON.stringify(payload) }); }
   patch<T>(path: string, payload: unknown) { return this.request<T>(path, { method: 'PATCH', body: JSON.stringify(payload) }); }
+  put<T>(path: string, payload: unknown) { return this.request<T>(path, { method: 'PUT', body: JSON.stringify(payload) }); }
   delete<T>(path: string, query = '') { return this.request<T>(`${path}${query}`, { method: 'DELETE' }); }
 
   getSprintDetail(id: number, signal?: AbortSignal) { return this.get<SprintDetail>(`/sprints/${id}`, signal); }
@@ -101,6 +106,16 @@ export class ApiClient {
   listMembers(projectId: number, signal?: AbortSignal) { return this.get<ProjectMember[]>(`/projects/${projectId}/members`, signal); }
   addMember(projectId: number, input: MemberCreateInput) { return this.post<ProjectMember>(`/projects/${projectId}/members`, input); }
   updateSprintDates(id: number, start_date: string, end_date: string) { return this.patch<Sprint>(`/sprints/${id}/dates`, { start_date, end_date }); }
+  getStageTemplate(signal?: AbortSignal) { return this.get<StageTemplateItem[]>('/stage-template', signal); }
+  createProject(input: ProjectCreateInput) { return this.post<Project>('/projects', input); }
+  listStages(projectId: number, signal?: AbortSignal) { return this.get<Stage[]>(`/projects/${projectId}/stages`, signal); }
+  addStage(projectId: number, input: StageTemplateItem) { return this.post<Stage>(`/projects/${projectId}/stages`, input); }
+  updateStage(projectId: number, stageId: number, input: StageUpdateInput) { return this.patch<Stage>(`/projects/${projectId}/stages/${stageId}`, input); }
+  reorderStages(projectId: number, stageIds: number[]) { return this.put<Stage[]>(`/projects/${projectId}/stages/reorder`, { stage_ids: stageIds }); }
+  deleteStage(projectId: number, stageId: number, confirm = false) { return this.delete<{ deleted: boolean }>(`/projects/${projectId}/stages/${stageId}`, confirm ? '?confirm=true' : ''); }
+  startStage(projectId: number, stageId: number, primary: boolean) { return this.post<Stage>(`/projects/${projectId}/stages/${stageId}/start`, { primary }); }
+  setPrimaryStage(projectId: number, stageId: number) { return this.post<Stage>(`/projects/${projectId}/stages/${stageId}/primary`, {}); }
+  completeStage(projectId: number, stageId: number, successorStageId?: number) { return this.post<Stage>(`/projects/${projectId}/stages/${stageId}/complete`, successorStageId ? { successor_stage_id: successorStageId } : {}); }
 }
 
 export const apiClient = new ApiClient();

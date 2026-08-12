@@ -151,7 +151,51 @@ export interface MemberCreateInput {
   role?: 'owner' | 'member';
 }
 
+export type StageStatus = 'planned' | 'active' | 'completed';
+
+export interface Stage {
+  id: number;
+  project_id: number;
+  name: string;
+  goal: string | null;
+  position: number;
+  owner_id: string | null;
+  planned_start: string | null;
+  planned_end: string | null;
+  status: StageStatus;
+  is_primary: boolean;
+  created_at: string;
+}
+
+export interface StageTemplateItem {
+  name: string;
+  goal?: string | null;
+  owner_id?: string | null;
+  planned_start?: string | null;
+  planned_end?: string | null;
+}
+
+export interface ProjectCreateInput {
+  name: string;
+  description?: string | null;
+  stages?: StageTemplateItem[] | null;
+}
+
+export interface StageUpdateInput {
+  name?: string;
+  goal?: string | null;
+  owner_id?: string | null;
+  planned_start?: string | null;
+  planned_end?: string | null;
+}
+
+export interface StageDeletePreview {
+  message: string;
+  impact: { tasks: number; deliverables: number };
+  confirm_required: boolean;
+}
+
 export interface ApiErrorShape {
-  detail?: string | Array<{ msg?: string }>;
+  detail?: string | Array<{ msg?: string }> | StageDeletePreview;
   message?: string;
 }

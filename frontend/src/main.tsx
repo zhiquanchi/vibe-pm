@@ -3,37 +3,48 @@ import type React from 'react';
 import { createRoot } from 'react-dom/client';
 import { Alert, Button as AntButton, ConfigProvider, Drawer as AntDrawer, Dropdown, Empty, Modal as AntModal, Statistic } from 'antd';
 import {
-  Activity, Archive, BarChart3, Bell, CalendarDays, Check, ChevronDown, CircleHelp,
-  GitBranch, LayoutDashboard, LogOut, MoreHorizontal, Plus, RefreshCw, Search, Settings2,
-  Shield, Users, X, Zap,
+  Activity, Archive, ArrowDown, ArrowUp, BarChart3, Bell, CalendarDays, Check, ChevronDown, CircleHelp,
+  Flag, GitBranch, LayoutDashboard, LogOut, Milestone, MoreHorizontal, Pencil, Play, Plus, RefreshCw, Search, Settings2,
+  Shield, Trash2, Users, X, Zap,
 } from 'lucide-react';
 import Board from './components/Board';
 import BurnupChart from './components/BurnupChart';
 import ScopeTimeline from './components/ScopeTimeline';
 import { apiClient, ApiError, getUserId } from './api';
 import { useSprintWorkspace } from './hooks';
-import type { ScopeChange, Sprint, SprintStatus, Task, TaskCreateInput, TaskStatus } from './types';
+import type { ProjectMember, ScopeChange, Sprint, SprintStatus, Stage, StageDeletePreview, StageStatus, StageTemplateItem, Task, TaskCreateInput, TaskStatus } from './types';
 import './styles.css';
 import './backlog.css';
 import './app-shell.css';
+import './stages.css';
 
 const projectId = 1;
 const statusLabel: Record<SprintStatus, string> = { planning: '规划中', active: '进行中', completed: '已完成' };
 const statusTone: Record<SprintStatus, string> = { planning: 'planning', active: 'active', completed: 'completed' };
+const stageStatusLabel: Record<StageStatus, string> = { planned: '未开始', active: '进行中', completed: '已完成' };
+const stageStatusTone: Record<StageStatus, string> = { planned: 'planning', active: 'active', completed: 'completed' };
 const taskStatusWeight: Record<TaskStatus, number> = { todo: 0, in_progress: .5, in_review: .8, done: 1 };
 
-type Route = { page: 'overview' | 'sprint' | 'sprints' | 'backlog' | 'reports' | 'members' | 'integrations' | 'settings' | 'not-found'; sprintId: number | null };
+type Route = { page: 'overview' | 'sprint' | 'sprints' | 'backlog' | 'reports' | 'members' | 'integrations' | 'settings' | 'stages' | 'stage-workbench' | 'project-new' | 'not-found'; sprintId: number | null; projectId: number; stageId: number | null };
 type Notice = { id: string; type: 'scope' | 'start' | 'end'; title: string; detail: string; sprintId: number; changeId?: number; read?: boolean };
 
 function readRoute(): Route {
   const parts = window.location.pathname.split('/').filter(Boolean);
   const sprintId = Number(new URLSearchParams(window.location.search).get('sprint_id')) || null;
-  if (!parts.length) return { page: 'overview', sprintId };
-  if (parts[0] !== 'projects' || parts[1] !== String(projectId)) return { page: 'not-found', sprintId };
+  const base = { sprintId, projectId, stageId: null as number | null };
+  if (!parts.length) return { page: 'overview', ...base };
+  if (parts[0] !== 'projects') return { page: 'not-found', ...base };
+  if (parts[1] === 'new') return { page: 'project-new', ...base };
+  const routeProjectId = Number(parts[1]) || projectId;
+  if (parts[2] === 'stages') {
+    const stageId = Number(parts[3]) || null;
+    return { page: stageId ? 'stage-workbench' : 'stages', sprintId, projectId: routeProjectId, stageId };
+  }
+  if (parts[1] !== String(projectId)) return { page: 'not-found', ...base };
   const section = parts[2];
-  if (!section) return { page: 'overview', sprintId };
+  if (!section) return { page: 'overview', ...base };
   const map: Record<string, Route['page']> = { sprints: parts[3] ? 'sprint' : 'sprints', backlog: 'backlog', reports: 'reports', members: 'members', integrations: 'integrations', settings: 'settings' };
-  return { page: map[section] ?? 'not-found', sprintId: Number(parts[3]) || sprintId };
+  return { page: map[section] ?? 'not-found', sprintId: Number(parts[3]) || sprintId, projectId, stageId: null };
 }
 
 function navigate(path: string) { window.history.pushState({}, '', path); window.dispatchEvent(new PopStateEvent('popstate')); }
@@ -88,9 +99,9 @@ function App() {
 
 function AppShell(props: { children: React.ReactNode; project: { name: string } | null; route: Route; currentSprint: Sprint | null; sprints: Sprint[]; sprintMenu: boolean; setSprintMenu: (value: boolean) => void; onSprintSelect: (id: number) => void; drawer: 'notifications' | 'user' | null; setDrawer: (value: 'notifications' | 'user' | null) => void; notices: Notice[]; setNotices: React.Dispatch<React.SetStateAction<Notice[]>>; isOwner: boolean; onWorkspace: () => void }) {
   const { route, currentSprint } = props;
-  const nav = (page: Route['page'], path: string) => <a className={`nav-item ${route.page === page || (page === 'sprint' && route.page === 'sprints') ? 'active' : ''}`} href={path}><span className="nav-icon">{page === 'overview' ? <LayoutDashboard size={17} /> : page === 'sprint' || page === 'sprints' ? <Activity size={17} /> : page === 'reports' ? <BarChart3 size={17} /> : page === 'backlog' ? <Archive size={17} /> : page === 'members' ? <Users size={17} /> : page === 'integrations' ? <GitBranch size={17} /> : <Settings2 size={17} />}</span><span>{page === 'backlog' ? 'Backlog' : page === 'sprint' || page === 'sprints' ? '迭代看板' : page === 'overview' ? '总览' : page === 'reports' ? '报告' : page === 'members' ? '成员' : page === 'integrations' ? '集成' : '设置'}</span></a>;
+  const nav = (page: Route['page'], path: string, label?: string, icon?: React.ReactNode) => <a className={`nav-item ${route.page === page || (page === 'sprint' && route.page === 'sprints') || (page === 'stages' && route.page === 'stage-workbench') ? 'active' : ''}`} href={path}><span className="nav-icon">{icon ?? (page === 'overview' ? <LayoutDashboard size={17} /> : page === 'sprint' || page === 'sprints' ? <Activity size={17} /> : page === 'reports' ? <BarChart3 size={17} /> : page === 'backlog' ? <Archive size={17} /> : page === 'members' ? <Users size={17} /> : page === 'integrations' ? <GitBranch size={17} /> : page === 'stages' ? <Milestone size={17} /> : <Settings2 size={17} />)}</span><span>{label ?? (page === 'backlog' ? 'Backlog' : page === 'sprint' || page === 'sprints' ? '迭代看板' : page === 'stages' ? '阶段' : page === 'overview' ? '总览' : page === 'reports' ? '报告' : page === 'members' ? '成员' : page === 'integrations' ? '集成' : '设置')}</span></a>;
   const unread = props.notices.filter((item) => !item.read).length;
-  return <div className="app-shell"><aside className="sidebar"><div className="brand"><div className="brand-mark"><Zap size={16} fill="currentColor" /></div><span>vibe<span className="brand-accent">pm</span></span></div><div className="workspace-switch"><div className="workspace-icon">V</div><div><b>{props.project?.name || 'Vibe PM'}</b><small>项目工作区</small></div><ChevronDown size={15} /></div><nav>{nav('overview', `/projects/${projectId}`)}{nav('sprint', currentSprint ? sprintPath(currentSprint.id) : `/projects/${projectId}/sprints`)}{nav('reports', `/projects/${projectId}/reports/${currentSprint?.id || ''}`)}{nav('backlog', `/projects/${projectId}/backlog`)}</nav><div className="nav-label">工作区</div><nav>{nav('members', `/projects/${projectId}/members`)}{nav('integrations', `/projects/${projectId}/integrations`)}</nav><div className="sidebar-bottom">{nav('settings', `/projects/${projectId}/settings`)}<AntUserMenu isOwner={props.isOwner} /></div></aside><main className="main"><header className="topbar"><div className="breadcrumbs"><a href={`/projects/${projectId}`}>{props.project?.name || 'Vibe PM'}</a><span>/</span><div className="sprint-picker"><button className="breadcrumb-button" onClick={() => props.setSprintMenu(!props.sprintMenu)}>{currentSprint?.name || '选择迭代'} <ChevronDown size={13} /></button>{props.sprintMenu && <SprintMenu sprints={props.sprints} selectedId={currentSprint?.id} onSelect={props.onSprintSelect} />}</div>{currentSprint && <span className={`status-pill ${statusTone[currentSprint.status]}`}><i /> {statusLabel[currentSprint.status]}</span>}</div><div className="top-actions"><button className="icon-btn notification-button" title="通知" onClick={() => props.setDrawer(props.drawer === 'notifications' ? null : 'notifications')}><Bell size={18} />{unread > 0 && <em>{unread}</em>}</button><button className="avatar avatar-blue avatar-button" title="打开用户菜单" onClick={() => props.setDrawer(props.drawer === 'user' ? null : 'user')}>XM</button></div></header><div className="content">{props.children}</div></main>{props.drawer === 'notifications' && <AntNotificationDrawer notices={props.notices} setNotices={props.setNotices} close={() => props.setDrawer(null)} />}{props.drawer === 'user' && <UserMenu isOwner={props.isOwner} close={() => props.setDrawer(null)} />}</div>;
+  return <div className="app-shell"><aside className="sidebar"><div className="brand"><div className="brand-mark"><Zap size={16} fill="currentColor" /></div><span>vibe<span className="brand-accent">pm</span></span></div><div className="workspace-switch"><div className="workspace-icon">V</div><div><b>{props.project?.name || 'Vibe PM'}</b><small>项目工作区</small></div><ChevronDown size={15} /></div><nav>{nav('overview', `/projects/${projectId}`)}{nav('sprint', currentSprint ? sprintPath(currentSprint.id) : `/projects/${projectId}/sprints`)}{nav('reports', `/projects/${projectId}/reports/${currentSprint?.id || ''}`)}{nav('backlog', `/projects/${projectId}/backlog`)}{nav('stages', `/projects/${projectId}/stages`)}</nav><div className="nav-label">工作区</div><nav>{nav('members', `/projects/${projectId}/members`)}{nav('integrations', `/projects/${projectId}/integrations`)}{nav('project-new', '/projects/new', '新建项目', <Plus size={17} />)}</nav><div className="sidebar-bottom">{nav('settings', `/projects/${projectId}/settings`)}<AntUserMenu isOwner={props.isOwner} /></div></aside><main className="main"><header className="topbar"><div className="breadcrumbs"><a href={`/projects/${projectId}`}>{props.project?.name || 'Vibe PM'}</a><span>/</span><div className="sprint-picker"><button className="breadcrumb-button" onClick={() => props.setSprintMenu(!props.sprintMenu)}>{currentSprint?.name || '选择迭代'} <ChevronDown size={13} /></button>{props.sprintMenu && <SprintMenu sprints={props.sprints} selectedId={currentSprint?.id} onSelect={props.onSprintSelect} />}</div>{currentSprint && <span className={`status-pill ${statusTone[currentSprint.status]}`}><i /> {statusLabel[currentSprint.status]}</span>}</div><div className="top-actions"><button className="icon-btn notification-button" title="通知" onClick={() => props.setDrawer(props.drawer === 'notifications' ? null : 'notifications')}><Bell size={18} />{unread > 0 && <em>{unread}</em>}</button><button className="avatar avatar-blue avatar-button" title="打开用户菜单" onClick={() => props.setDrawer(props.drawer === 'user' ? null : 'user')}>XM</button></div></header><div className="content">{props.children}</div></main>{props.drawer === 'notifications' && <AntNotificationDrawer notices={props.notices} setNotices={props.setNotices} close={() => props.setDrawer(null)} />}{props.drawer === 'user' && <UserMenu isOwner={props.isOwner} close={() => props.setDrawer(null)} />}</div>;
 }
 
 function AntNotificationDrawer({ notices, setNotices, close }: { notices: Notice[]; setNotices: React.Dispatch<React.SetStateAction<Notice[]>>; close: () => void }) { return <AntDrawer title="通知" open onClose={close} placement="right" width={360} destroyOnHidden>{notices.length ? <div className="notice-list">{notices.map((notice) => <button className={`notice-row ${notice.read ? 'read' : ''}`} key={notice.id} onClick={() => { setNotices((items) => items.map((item) => item.id === notice.id ? { ...item, read: true } : item)); navigate(sprintPath(notice.sprintId)); close(); }}><span className={`notice-dot ${notice.type}`} /><span><b>{notice.title}</b><small>{notice.detail}</small></span>{!notice.read && <i />}</button>)}</div> : <Empty description="范围变更和迭代状态更新会显示在这里" />}</AntDrawer>; }
@@ -101,6 +112,9 @@ function NotificationDrawer({ notices, setNotices, close }: { notices: Notice[];
 function UserMenu({ isOwner, close }: { isOwner: boolean; close: () => void }) { return <div className="popover user-menu"><div className="user-menu-profile"><div className="avatar avatar-purple">XM</div><div><b>小明</b><span>xiaoming@example.com</span></div></div><div className="identity-note"><Shield size={15} /> 开发模式身份：<code>{getUserId()}</code><small>请求通过 X-User-Id 识别用户</small></div><div className="menu-role"><span>当前角色</span><b>{isOwner ? 'Owner' : 'Member'}</b></div><button className="disabled-menu-item" disabled title="账户设置尚未开放"><Settings2 size={15} /> 账户设置 <small>尚未开放</small></button><button className="disabled-menu-item" disabled title="退出登录尚未接入"><LogOut size={15} /> 退出登录 <small>开发模式不可用</small></button><button className="menu-close" onClick={close}>关闭菜单</button></div>; }
 
 function PageContent({ route, currentSprint, currentSprintId, sprints, members, isOwner, project, onRefresh, onToast, onNotice, setSprints, setProject }: { route: Route; currentSprint: Sprint | null; currentSprintId: number | null; sprints: Sprint[]; members: Array<{ id: string; name: string; email: string; role: string }>; isOwner: boolean; project: { id: number; name: string; description: string | null } | null; onRefresh: () => Promise<void>; onToast: (message: string) => void; onNotice: (change: ScopeChange, sprintId: number) => void; setSprints: React.Dispatch<React.SetStateAction<Sprint[]>>; setProject: React.Dispatch<React.SetStateAction<{ id: number; name: string; description: string | null } | null>> }) {
+  if (route.page === 'project-new') return <ProjectCreatePage onToast={onToast} />;
+  if (route.page === 'stages') return <StageListPage routeProjectId={route.projectId} onToast={onToast} />;
+  if (route.page === 'stage-workbench') return <StageWorkbenchPage routeProjectId={route.projectId} stageId={route.stageId} />;
   if (route.page === 'overview') return <OverviewPage sprint={currentSprint} sprints={sprints} onRefresh={onRefresh} onToast={onToast} />;
   if (route.page === 'sprints') return <SprintListPage sprints={sprints} onCreate={(sprint) => { setSprints((items) => [sprint, ...items]); navigate(sprintPath(sprint.id)); }} onToast={onToast} />;
   if (route.page === 'backlog') return <BacklogPage currentSprint={currentSprint} sprints={sprints} onRefresh={onRefresh} onToast={onToast} />;
@@ -132,6 +146,143 @@ function ReportPage({ sprint, sprints, onSelect, onToast }: { sprint: Sprint | n
 function MembersPage({ members, isOwner, onRefresh, onToast }: { members: Array<{ id: string; name: string; email: string; role: string }>; isOwner: boolean; onRefresh: () => Promise<void>; onToast: (message: string) => void }) { const [open, setOpen] = useState(false); const [saving, setSaving] = useState(false); const submit = async (event: React.FormEvent<HTMLFormElement>) => { event.preventDefault(); setSaving(true); const form = new FormData(event.currentTarget); try { await apiClient.addMember(projectId, { user_id: String(form.get('email')), name: String(form.get('name')), email: String(form.get('email')), role: 'member' }); await onRefresh(); setOpen(false); onToast('成员已添加'); } catch (error) { onToast(errorText(error)); } finally { setSaving(false); } }; return <><PageHeader eyebrow="TEAM" title="成员" copy="查看项目成员与访问角色。" actions={<button className="primary-btn" disabled={!isOwner} title={!isOwner ? '只有 Owner 可以添加成员' : undefined} onClick={() => setOpen(true)}><Plus size={15} /> 添加成员</button>} /><section className="panel members-page">{members.length ? <div className="member-list">{members.map((member) => <div className="member-row" key={member.id}><div className="avatar avatar-blue">{member.name.slice(0, 2)}</div><div><b>{member.name}</b><small>{member.email}</small></div><span className={`role-tag ${member.role}`}>{member.role === 'owner' ? 'Owner' : 'Member'}</span></div>)}</div> : <EmptyState title="暂无成员" copy="项目成员信息加载后会显示在这里。" />}{!isOwner && <p className="permission-note"><Shield size={14} /> 你是项目成员，只能查看成员列表。</p>}</section>{open && <Modal title="添加成员" close={() => setOpen(false)}><form className="form-stack" onSubmit={submit}><label>姓名<input name="name" required /></label><label>邮箱<input name="email" type="email" required /></label><button className="primary-btn full" disabled={saving}>{saving ? '添加中…' : '添加成员'}</button></form></Modal>}</> }
 function IntegrationsPage() { return <><PageHeader eyebrow="PROJECT CONNECTIONS" title="集成" copy="查看项目可用的自动化连接能力。" /><section className="integration-grid"><div className="panel integration-card"><div className="integration-icon"><GitBranch size={22} /></div><div className="integration-copy"><div><h2>GitHub</h2><span className="status-pill planning">MVP-2</span></div><p>提交、Pull Request 与任务进度自动关联。</p><small>连接能力将在 MVP-2 提供，当前不会伪造 OAuth 或已连接状态。</small></div><button className="ghost-btn" disabled title="GitHub 集成将在 MVP-2 提供">连接 GitHub</button></div><div className="panel manual-card"><Zap size={18} /><div><b>手动更新仍然可用</b><p>你可以继续通过看板、Backlog 和范围时间线管理任务与进度。</p></div></div></section></> }
 function SettingsPage({ project, isOwner, onSaved, onToast }: { project: { id: number; name: string; description: string | null } | null; isOwner: boolean; onSaved: (value: { id: number; name: string; description: string | null }) => void; onToast: (message: string) => void }) { const [name, setName] = useState(project?.name || ''); const [description, setDescription] = useState(project?.description || ''); const [cycle, setCycle] = useState('2'); const [dirty, setDirty] = useState(false); const [saving, setSaving] = useState(false); useEffect(() => { setName(project?.name || ''); setDescription(project?.description || ''); }, [project]); useEffect(() => { const guard = (event: BeforeUnloadEvent) => { if (dirty) event.preventDefault(); }; window.addEventListener('beforeunload', guard); return () => window.removeEventListener('beforeunload', guard); }, [dirty]); const save = async (event: React.FormEvent) => { event.preventDefault(); setSaving(true); try { const value = await apiClient.updateProject(projectId, { name, description, default_sprint_weeks: Number(cycle) as 1 | 2 }); onSaved(value); setDirty(false); } catch (error) { onToast(errorText(error)); } finally { setSaving(false); } }; return <><PageHeader eyebrow="PROJECT SETTINGS" title="设置" copy="管理项目基本信息与默认迭代周期。" /><section className="panel settings-page"><form className="settings-form" onSubmit={save}><div className="settings-section"><h2>基本信息</h2><p>这些信息会显示在项目顶栏和工作区选择器中。</p><label>项目名称<input value={name} onChange={(event) => { setName(event.target.value); setDirty(true); }} disabled={!isOwner} /></label><label>项目描述<textarea value={description} onChange={(event) => { setDescription(event.target.value); setDirty(true); }} disabled={!isOwner} /></label></div><div className="settings-section"><h2>迭代默认周期</h2><p>新建迭代时使用的默认时间长度。</p><div className="segmented wide"><button type="button" className={cycle === '1' ? 'selected' : ''} onClick={() => { setCycle('1'); setDirty(true); }}>1 周</button><button type="button" className={cycle === '2' ? 'selected' : ''} onClick={() => { setCycle('2'); setDirty(true); }}>2 周</button></div></div>{!isOwner && <div className="permission-note"><Shield size={14} /> 只有项目 Owner 可以修改设置，当前字段为只读。</div>}<div className="settings-actions"><button type="button" className="ghost-btn" onClick={() => { if (dirty && !window.confirm('有未保存的修改，确定取消吗？')) return; setName(project?.name || ''); setDescription(project?.description || ''); setDirty(false); }}>取消</button><button className="primary-btn" disabled={!isOwner || !dirty || saving}>{saving ? '保存中…' : '保存设置'}</button></div></form></section></> }
+function validateStages(stages: StageTemplateItem[]): string | null { if (!stages.length) return '项目必须至少保留一个阶段'; const names = stages.map((item) => item.name.trim()); if (names.some((name) => !name)) return '阶段名称不能为空'; if (new Set(names).size !== names.length) return '同一项目内阶段名称不能重复'; return null; }
+
+function ProjectCreatePage({ onToast }: { onToast: (message: string) => void }) {
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [stages, setStages] = useState<StageTemplateItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const load = () => { setLoading(true); setError(null); apiClient.getStageTemplate().then((items) => setStages(items.map((item) => ({ name: item.name })))).catch((err) => setError(errorText(err))).finally(() => setLoading(false)); };
+  useEffect(load, []);
+  const validation = validateStages(stages);
+  const update = (index: number, value: string) => setStages((items) => items.map((item, i) => (i === index ? { ...item, name: value } : item)));
+  const move = (index: number, delta: number) => setStages((items) => { const target = index + delta; if (target < 0 || target >= items.length) return items; const next = [...items]; [next[index], next[target]] = [next[target], next[index]]; return next; });
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (validation) { onToast(validation); return; }
+    setSaving(true);
+    try { const project = await apiClient.createProject({ name: name.trim(), description: description.trim() || null, stages: stages.map((item) => ({ ...item, name: item.name.trim() })) }); onToast('项目已创建'); navigate(`/projects/${project.id}/stages`); }
+    catch (err) { onToast(errorText(err)); } finally { setSaving(false); }
+  };
+  return <><PageHeader eyebrow="NEW PROJECT" title="新建项目" copy="从默认开发模板创建项目，创建前可调整阶段。" />
+    {error ? <ErrorState message={error} retry={load} /> : loading ? <LoadingState /> : <section className="panel stage-create"><form className="form-stack" onSubmit={submit}>
+      <label>项目名称<input value={name} onChange={(event) => setName(event.target.value)} required placeholder="例如：支付中台 2.0" /></label>
+      <label>项目描述<textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="这个项目要交付什么？" /></label>
+      <div className="stage-edit-list"><div className="section-label"><span>项目阶段</span><em>{stages.length}</em></div>
+        {stages.map((stage, index) => <div className="stage-edit-row" key={index}><span className="stage-pos">{index + 1}</span><input value={stage.name} onChange={(event) => update(index, event.target.value)} placeholder="阶段名称" /><div className="stage-row-actions"><button type="button" className="icon-btn" title="上移" disabled={index === 0} onClick={() => move(index, -1)}><ArrowUp size={14} /></button><button type="button" className="icon-btn" title="下移" disabled={index === stages.length - 1} onClick={() => move(index, 1)}><ArrowDown size={14} /></button><button type="button" className="icon-btn danger" title="删除阶段" onClick={() => setStages((items) => items.filter((_, i) => i !== index))}><Trash2 size={14} /></button></div></div>)}
+        <button type="button" className="ghost-btn" onClick={() => setStages((items) => [...items, { name: '' }])}><Plus size={14} /> 添加阶段</button></div>
+      {validation && <p className="permission-note"><CircleHelp size={14} /> {validation}</p>}
+      <button className="primary-btn full" disabled={saving || !!validation}>{saving ? '创建中…' : '创建项目'}</button>
+    </form></section>}</>;
+}
+
+type StageModal = { kind: 'add' } | { kind: 'edit'; stage: Stage } | { kind: 'delete'; stage: Stage; impact: { tasks: number; deliverables: number } } | { kind: 'start'; stage: Stage } | { kind: 'complete'; stage: Stage };
+
+function StageListPage({ routeProjectId, onToast }: { routeProjectId: number; onToast: (message: string) => void }) {
+  const [stages, setStages] = useState<Stage[]>([]);
+  const [members, setMembers] = useState<ProjectMember[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [modal, setModal] = useState<StageModal | null>(null);
+  const isOwner = members.find((member) => member.id === getUserId())?.role === 'owner' || getUserId() === 'demo-user';
+  const load = async () => { setLoading(true); setError(null); try { const [stageList, detail] = await Promise.all([apiClient.listStages(routeProjectId), apiClient.getProject(routeProjectId)]); setStages(stageList); setMembers(detail.members); } catch (err) { setError(errorText(err)); } finally { setLoading(false); } };
+  useEffect(() => { void load(); }, [routeProjectId]);
+  const run = async (action: () => Promise<unknown>, message: string) => { try { await action(); setModal(null); await load(); onToast(message); } catch (err) { onToast(errorText(err)); } };
+  const move = (stage: Stage, delta: number) => {
+    const movable = stages.filter((item) => item.status !== 'completed');
+    const index = movable.findIndex((item) => item.id === stage.id);
+    const target = index + delta;
+    if (index < 0 || target < 0 || target >= movable.length) return;
+    const ids = movable.map((item) => item.id);
+    [ids[index], ids[target]] = [ids[target], ids[index]];
+    void run(() => apiClient.reorderStages(routeProjectId, ids), '阶段顺序已调整');
+  };
+  const remove = async (stage: Stage) => {
+    try { await apiClient.deleteStage(routeProjectId, stage.id); await load(); onToast('阶段已删除'); }
+    catch (err) {
+      const detail = err instanceof ApiError ? (err.body as { detail?: unknown } | null)?.detail : null;
+      if (err instanceof ApiError && err.status === 409 && detail && typeof detail === 'object' && 'confirm_required' in detail) { const preview = detail as unknown as StageDeletePreview; setModal({ kind: 'delete', stage, impact: preview.impact }); return; }
+      onToast(errorText(err));
+    }
+  };
+  const ownerName = (ownerId: string | null) => (ownerId ? members.find((member) => member.id === ownerId)?.name || ownerId : '未指定');
+  const activeStages = stages.filter((item) => item.status === 'active');
+  return <><PageHeader eyebrow="PROJECT STAGES" title="项目阶段" copy="按开发流程推进阶段，主阶段标识当前主要方向。" actions={<button className="primary-btn" disabled={!isOwner} title={!isOwner ? '只有项目负责人可以修改阶段结构' : undefined} onClick={() => setModal({ kind: 'add' })}><Plus size={15} /> 新增阶段</button>} />
+    {error ? <ErrorState message={error} retry={load} /> : loading ? <LoadingState /> : !stages.length ? <EmptyState title="暂无阶段" copy="从新增阶段开始搭建项目开发流程。" action={isOwner ? <button className="primary-btn" onClick={() => setModal({ kind: 'add' })}><Plus size={15} /> 新增阶段</button> : undefined} /> : <div className="stage-list">{stages.map((stage) => <div className={`stage-row ${stage.status}`} key={stage.id}>
+      <span className="stage-pos">{stage.position + 1}</span>
+      <div className="stage-main"><a className="stage-name" href={`/projects/${routeProjectId}/stages/${stage.id}`}>{stage.name}</a><small>{stage.goal || '暂无阶段目标'}</small></div>
+      <div className="stage-meta"><span>{ownerName(stage.owner_id)}</span><small>{stage.planned_start || stage.planned_end ? `${formatDate(stage.planned_start)} - ${formatDate(stage.planned_end)}` : '未排期'}</small></div>
+      <span className={`status-pill ${stageStatusTone[stage.status]}`}><i /> {stageStatusLabel[stage.status]}</span>
+      {stage.status === 'active' && <span className={`role-tag ${stage.is_primary ? 'owner' : ''}`}>{stage.is_primary ? '主阶段' : '并行阶段'}</span>}
+      <div className="stage-row-actions">
+        {isOwner && stage.status !== 'completed' && <><button className="icon-btn" title="上移" onClick={() => move(stage, -1)}><ArrowUp size={14} /></button><button className="icon-btn" title="下移" onClick={() => move(stage, 1)}><ArrowDown size={14} /></button></>}
+        {isOwner && stage.status === 'planned' && <button className="ghost-btn small" onClick={() => setModal({ kind: 'start', stage })}><Play size={13} /> 启动</button>}
+        {isOwner && stage.status === 'active' && !stage.is_primary && <button className="ghost-btn small" onClick={() => void run(() => apiClient.setPrimaryStage(routeProjectId, stage.id), '主阶段已切换')}><Flag size={13} /> 设为主阶段</button>}
+        {isOwner && stage.status === 'active' && <button className="ghost-btn small" onClick={() => setModal({ kind: 'complete', stage })}><Check size={13} /> 完成</button>}
+        {isOwner && <button className="icon-btn" title="编辑阶段" onClick={() => setModal({ kind: 'edit', stage })}><Pencil size={14} /></button>}
+        {isOwner && stage.status !== 'completed' && <button className="icon-btn danger" title="删除阶段" onClick={() => void remove(stage)}><Trash2 size={14} /></button>}
+      </div></div>)}</div>}
+    {!isOwner && !loading && !error && <p className="permission-note"><Shield size={14} /> 你是项目成员，只能查看阶段列表。</p>}
+    {modal && (modal.kind === 'add' || modal.kind === 'edit') && <StageFormModal routeProjectId={routeProjectId} members={members} stage={modal.kind === 'edit' ? modal.stage : null} onClose={() => setModal(null)} onSaved={(message) => void run(async () => undefined, message)} reload={load} onToast={onToast} />}
+    {modal?.kind === 'delete' && <Modal title="删除阶段" close={() => setModal(null)}><div className="form-stack"><p>删除「{modal.stage.name}」将同时影响其中 <b>{modal.impact.tasks}</b> 个任务和 <b>{modal.impact.deliverables}</b> 个交付物，确认删除？</p><div className="form-grid"><button className="ghost-btn" onClick={() => setModal(null)}>取消</button><button className="primary-btn danger" onClick={() => void run(() => apiClient.deleteStage(routeProjectId, modal.stage.id, true), '阶段已删除')}>确认删除</button></div></div></Modal>}
+    {modal?.kind === 'start' && <Modal title={`启动阶段「${modal.stage.name}」`} close={() => setModal(null)}><div className="form-stack"><p>{activeStages.length ? '选择启动方式：主阶段是当前主要推进方向，并行阶段与主阶段同时推进。' : '这是项目首个启动的阶段，将自动成为主阶段。'}</p><div className="form-grid"><button className="ghost-btn" disabled={!activeStages.length} onClick={() => void run(() => apiClient.startStage(routeProjectId, modal.stage.id, false), '阶段已启动为并行阶段')}>并行启动</button><button className="primary-btn" onClick={() => void run(() => apiClient.startStage(routeProjectId, modal.stage.id, true), '阶段已启动')}>{activeStages.length ? '作为主阶段启动' : '启动（自动成为主阶段）'}</button></div></div></Modal>}
+    {modal?.kind === 'complete' && <StageCompleteModal routeProjectId={routeProjectId} stage={modal.stage} activeStages={activeStages} onClose={() => setModal(null)} onDone={(message) => void run(async () => undefined, message)} onToast={onToast} />}
+  </>;
+}
+
+function StageFormModal({ routeProjectId, members, stage, onClose, onSaved, reload, onToast }: { routeProjectId: number; members: ProjectMember[]; stage: Stage | null; onClose: () => void; onSaved: (message: string) => void; reload: () => Promise<void>; onToast: (message: string) => void }) {
+  const [saving, setSaving] = useState(false);
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); setSaving(true);
+    const form = new FormData(event.currentTarget);
+    const input = { name: String(form.get('name') || '').trim(), goal: String(form.get('goal') || '').trim() || null, owner_id: String(form.get('owner_id') || '') || null, planned_start: String(form.get('planned_start') || '') || null, planned_end: String(form.get('planned_end') || '') || null };
+    try { if (stage) await apiClient.updateStage(routeProjectId, stage.id, input); else await apiClient.addStage(routeProjectId, input); await reload(); onClose(); onToast(stage ? '阶段已更新' : '阶段已新增'); }
+    catch (err) { onToast(errorText(err)); } finally { setSaving(false); }
+  };
+  const completed = stage?.status === 'completed';
+  return <Modal title={stage ? `编辑阶段「${stage.name}」` : '新增阶段'} close={onClose}><form className="form-stack" onSubmit={submit}>
+    <label>阶段名称<input name="name" defaultValue={stage?.name || ''} required disabled={completed} title={completed ? '已完成阶段不能重命名' : undefined} /></label>
+    <label>阶段目标<input name="goal" defaultValue={stage?.goal || ''} placeholder="这个阶段要达成什么？" /></label>
+    <label>负责人<select name="owner_id" defaultValue={stage?.owner_id || ''}><option value="">未指定</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
+    <div className="form-grid"><label>计划开始<input name="planned_start" type="date" defaultValue={stage?.planned_start || ''} /></label><label>计划结束<input name="planned_end" type="date" defaultValue={stage?.planned_end || ''} /></label></div>
+    <button className="primary-btn full" disabled={saving}>{saving ? '保存中…' : stage ? '保存修改' : '新增阶段'}</button>
+  </form></Modal>;
+}
+
+function StageCompleteModal({ routeProjectId, stage, activeStages, onClose, onDone, onToast }: { routeProjectId: number; stage: Stage; activeStages: Stage[]; onClose: () => void; onDone: (message: string) => void; onToast: (message: string) => void }) {
+  const others = activeStages.filter((item) => item.id !== stage.id);
+  const needsSuccessor = stage.is_primary && others.length > 0;
+  const [successor, setSuccessor] = useState('');
+  const [saving, setSaving] = useState(false);
+  const submit = async () => {
+    if (needsSuccessor && !successor) { onToast('完成主阶段需指定继任主阶段'); return; }
+    setSaving(true);
+    try { await apiClient.completeStage(routeProjectId, stage.id, successor ? Number(successor) : undefined); onClose(); onDone('阶段已完成'); }
+    catch (err) { onToast(errorText(err)); } finally { setSaving(false); }
+  };
+  return <Modal title={`完成阶段「${stage.name}」`} close={onClose}><div className="form-stack">
+    <p>{needsSuccessor ? '该阶段是主阶段，完成后需由其他活动阶段接任主阶段。' : '完成后阶段将转为已完成，不能删除或调整顺序。'}</p>
+    {needsSuccessor && <label>继任主阶段<select value={successor} onChange={(event) => setSuccessor(event.target.value)}><option value="">请选择</option>{others.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
+    <div className="form-grid"><button className="ghost-btn" onClick={onClose}>取消</button><button className="primary-btn" disabled={saving} onClick={() => void submit()}>{saving ? '提交中…' : '确认完成'}</button></div>
+  </div></Modal>;
+}
+
+function StageWorkbenchPage({ routeProjectId, stageId }: { routeProjectId: number; stageId: number | null }) {
+  const [stage, setStage] = useState<Stage | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const load = () => { setLoading(true); setError(null); apiClient.listStages(routeProjectId).then((stages) => setStage(stages.find((item) => item.id === stageId) || null)).catch((err) => setError(errorText(err))).finally(() => setLoading(false)); };
+  useEffect(load, [routeProjectId, stageId]);
+  if (error) return <ErrorState message={error} retry={load} />;
+  if (loading) return <LoadingState />;
+  if (!stage) return <><PageHeader eyebrow="STAGE" title="阶段工作台" /><EmptyState title="阶段不存在" copy="它可能已被删除，返回阶段列表查看。" action={<button className="primary-btn" onClick={() => navigate(`/projects/${routeProjectId}/stages`)}><Milestone size={15} /> 返回阶段列表</button>} /></>;
+  return <><PageHeader eyebrow="STAGE WORKBENCH" title={stage.name} copy={stage.goal || '暂无阶段目标'} actions={<><span className={`status-pill ${stageStatusTone[stage.status]}`}><i /> {stageStatusLabel[stage.status]}</span>{stage.status === 'active' && <span className={`role-tag ${stage.is_primary ? 'owner' : ''}`}>{stage.is_primary ? '主阶段' : '并行阶段'}</span>}</>} />
+    <section className="panel stage-workbench"><div className="overview-sprint"><div><span>顺序</span><b>第 {stage.position + 1} 阶段</b></div><div><span>负责人</span><b>{stage.owner_id || '未指定'}</b></div><div><span>计划日期</span><b>{stage.planned_start || stage.planned_end ? `${formatDate(stage.planned_start)} - ${formatDate(stage.planned_end)}` : '未排期'}</b></div></div><p className="permission-note"><Milestone size={14} /> 阶段任务管理与交付物将在后续迭代提供，当前为工作台占位页。</p><button className="text-btn" onClick={() => navigate(`/projects/${routeProjectId}/stages`)}>返回阶段列表 <span>→</span></button></section></>;
+}
+
 function Modal({ title, children, close }: { title: string; children: React.ReactNode; close: () => void }) { return <AntModal open title={title} footer={null} onCancel={close} destroyOnHidden>{children}</AntModal>; }
 function PermissionDenied() { return <div className="not-found"><div className="brand"><div className="brand-mark"><Zap size={16} fill="currentColor" /></div>vibe<span className="brand-accent">pm</span></div><div className="not-found-card"><Shield size={34} color="#7056df" /><h1>无权限访问</h1><p>你不是该项目成员，请联系项目 Owner。</p><button className="primary-btn" onClick={() => navigate('/')}><LayoutDashboard size={15} /> 返回首页</button></div></div>; }
 function NotFound() { return <div className="not-found"><div className="brand"><div className="brand-mark"><Zap size={16} fill="currentColor" /></div>vibe<span className="brand-accent">pm</span></div><div className="not-found-card"><b>404</b><h1>页面不存在</h1><p>这个地址没有对应的项目页面。</p><button className="primary-btn" onClick={() => navigate(`/projects/${projectId}`)}><LayoutDashboard size={15} /> 返回总览</button></div></div>; }
