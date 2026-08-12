@@ -11,5 +11,7 @@ def database_path() -> Path:
 
 
 def cors_origins() -> list[str]:
-    value = os.getenv("VIBE_PM_CORS_ORIGINS", "http://localhost:5173")
+    value = os.getenv(
+        "VIBE_PM_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+    )
     return [origin.strip() for origin in value.split(",") if origin.strip()]

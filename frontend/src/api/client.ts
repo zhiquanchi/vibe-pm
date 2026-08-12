@@ -29,7 +29,7 @@ export function getApiBaseUrl(): string {
 }
 
 export function getUserId(): string {
-  return env.VITE_USER_ID || env.NEXT_PUBLIC_USER_ID || 'current-user';
+  return env.VITE_USER_ID || env.NEXT_PUBLIC_USER_ID || 'demo-user';
 }
 
 export class ApiError extends Error {
