@@ -78,7 +78,7 @@ export interface ProjectMember {
   name: string;
   email: string;
   avatar_url?: string | null;
-  role: 'owner' | 'member';
+  role: 'owner' | 'member' | 'observer';
 }
 
 export interface SprintStats {
@@ -148,7 +148,11 @@ export interface MemberCreateInput {
   user_id: string;
   name: string;
   email: string;
-  role?: 'owner' | 'member';
+  role?: 'owner' | 'member' | 'observer';
+}
+
+export interface MemberUpdateInput {
+  role: 'owner' | 'member' | 'observer';
 }
 
 export type StageStatus = 'planned' | 'active' | 'completed';

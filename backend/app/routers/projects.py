@@ -10,7 +10,8 @@ from sqlalchemy.orm import Session
 from app.core.identity import current_user_id
 from app.db.database import get_db
 from app.db.models import Profile, Project, ProjectMember
-from app.schemas.projects import MemberCreate, ProjectCreate, ProjectUpdate
+from app.schemas.projects import MemberCreate, MemberUpdate, ProjectCreate, ProjectUpdate
+from app.services import projects as project_service
 from app.services import stages as stage_service
 from app.services.common import to_dict
 
@@ -47,10 +48,29 @@ def create_project(payload: ProjectCreate, user_id: str = Depends(current_user_i
     # Development identities are provisioned on first use.
     if session.get(Profile, user_id) is None:
         session.add(Profile(id=user_id, name=user_id, email=f"{user_id}@local.invalid", created_at=now))
+
     project = Project(name=payload.name, description=payload.description, created_at=now)
     session.add(project)
     session.flush()
-    session.add(ProjectMember(project_id=project.id, user_id=user_id, role="owner"))
+
+    # Handle members
+    if payload.members is not None:
+        # Use provided members list (must have at least 2 owners - validated in schema)
+        for member_spec in payload.members:
+            # Upsert profile
+            profile = session.get(Profile, member_spec.user_id)
+            if profile is None:
+                profile = Profile(id=member_spec.user_id, name=member_spec.name, email=member_spec.email, created_at=now)
+                session.add(profile)
+            else:
+                profile.name = member_spec.name
+                profile.email = member_spec.email
+            # Add member
+            session.add(ProjectMember(project_id=project.id, user_id=member_spec.user_id, role=member_spec.role))
+    else:
+        # Backward compatibility: creator becomes the only owner
+        session.add(ProjectMember(project_id=project.id, user_id=user_id, role="owner"))
+
     stage_service.create_stages_for_project(session, project, payload.stages, user_id)
     session.commit()
     return to_dict(session.get(Project, project.id))
@@ -70,27 +90,30 @@ def list_members(project_id: int, _user_id: str = Depends(require_project_member
 
 
 @router.post("/{project_id}/members")
-def add_member(project_id: int, payload: MemberCreate, _user_id: str = Depends(require_project_member), session: Session = Depends(get_db)):
-    if payload.role not in {"owner", "member"}:
-        raise HTTPException(status_code=422, detail="Invalid member role")
+def add_member(project_id: int, payload: MemberCreate, user_id: str = Depends(require_project_member), session: Session = Depends(get_db)):
     _project_or_404(session, project_id)
-    owner = session.get(ProjectMember, (project_id, _user_id))
+    owner = session.get(ProjectMember, (project_id, user_id))
     if owner is None or owner.role != "owner":
-        raise HTTPException(status_code=403, detail="只有项目 Owner 可以添加成员")
-    if session.get(ProjectMember, (project_id, payload.user_id)) is not None:
-        raise HTTPException(status_code=409, detail="该成员已经在项目中")
-    now = datetime.utcnow().isoformat()
-    profile_stmt = sqlite_insert(Profile).values(id=payload.user_id, name=payload.name, email=payload.email, created_at=now)
-    session.execute(profile_stmt.on_conflict_do_update(index_elements=[Profile.id], set_={"name": profile_stmt.excluded.name, "email": profile_stmt.excluded.email}))
-    member_stmt = sqlite_insert(ProjectMember).values(project_id=project_id, user_id=payload.user_id, role=payload.role)
-    session.execute(member_stmt.on_conflict_do_update(index_elements=[ProjectMember.project_id, ProjectMember.user_id], set_={"role": member_stmt.excluded.role}))
-    session.commit()
-    row = session.execute(
-        select(Profile.id, Profile.name, Profile.email, Profile.avatar_url, ProjectMember.role)
-        .join_from(ProjectMember, Profile, Profile.id == ProjectMember.user_id)
-        .where(ProjectMember.project_id == project_id, ProjectMember.user_id == payload.user_id)
-    ).mappings().first()
-    return dict(row)
+        raise HTTPException(status_code=403, detail="只有项目负责人可以添加成员")
+    return project_service.add_member(session, project_id, payload.user_id, payload.name, payload.email, payload.role, user_id)
+
+
+@router.patch("/{project_id}/members/{user_id}")
+def update_member_role(project_id: int, user_id: str, payload: MemberUpdate, current_user: str = Depends(require_project_member), session: Session = Depends(get_db)):
+    _project_or_404(session, project_id)
+    owner = session.get(ProjectMember, (project_id, current_user))
+    if owner is None or owner.role != "owner":
+        raise HTTPException(status_code=403, detail="只有项目负责人可以调整成员角色")
+    return project_service.update_member_role(session, project_id, user_id, payload.role, current_user)
+
+
+@router.delete("/{project_id}/members/{user_id}")
+def remove_member(project_id: int, user_id: str, current_user: str = Depends(require_project_member), session: Session = Depends(get_db)):
+    _project_or_404(session, project_id)
+    owner = session.get(ProjectMember, (project_id, current_user))
+    if owner is None or owner.role != "owner":
+        raise HTTPException(status_code=403, detail="只有项目负责人可以移除成员")
+    return project_service.remove_member(session, project_id, user_id, current_user)
 
 
 @router.patch("/{project_id}")

@@ -6,7 +6,8 @@ FastAPI + SQLite API for Sprint, Task, Scope Change and Snapshot data.
 
 - `app/main.py`: application factory/lifespan and middleware
 - `app/routers/api.py`: HTTP endpoints and status codes
-- `app/routers/stages.py` + `app/services/stages.py`: project stage template, structure management, primary-stage rules and activity records
+- `app/routers/projects.py` + `app/services/projects.py`: project member management, role adjustment, removal checks and activity records
+- `app/routers/stages.py` + `app/services/stages.py`: project stage template, structure management, stage owner assignment, primary-stage rules and activity records
 - `app/schemas/`: Pydantic request validation
 - `app/db/models.py`: SQLAlchemy ORM models for all tables
 - `app/db/database.py`: engine/session factory, schema initialization, demo seed and snapshot upsert

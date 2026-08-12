@@ -15,6 +15,7 @@ import type {
   TaskCreateInput,
   TaskUpdateInput,
   MemberCreateInput,
+  MemberUpdateInput,
   Project,
   ProjectCreateInput,
   ProjectMember,
@@ -105,6 +106,9 @@ export class ApiClient {
   updateProject(projectId: number, input: ProjectUpdateInput) { return this.patch<Project>(`/projects/${projectId}`, input); }
   listMembers(projectId: number, signal?: AbortSignal) { return this.get<ProjectMember[]>(`/projects/${projectId}/members`, signal); }
   addMember(projectId: number, input: MemberCreateInput) { return this.post<ProjectMember>(`/projects/${projectId}/members`, input); }
+  updateMemberRole(projectId: number, userId: string, input: MemberUpdateInput) { return this.patch<ProjectMember>(`/projects/${projectId}/members/${userId}`, input); }
+  removeMember(projectId: number, userId: string) { return this.delete<{ removed: boolean }>(`/projects/${projectId}/members/${userId}`); }
+  updateStageOwner(projectId: number, stageId: number, ownerId: string | null) { return this.patch<Stage>(`/projects/${projectId}/stages/${stageId}`, { owner_id: ownerId }); }
   updateSprintDates(id: number, start_date: string, end_date: string) { return this.patch<Sprint>(`/sprints/${id}/dates`, { start_date, end_date }); }
   getStageTemplate(signal?: AbortSignal) { return this.get<StageTemplateItem[]>('/stage-template', signal); }
   createProject(input: ProjectCreateInput) { return this.post<Project>('/projects', input); }

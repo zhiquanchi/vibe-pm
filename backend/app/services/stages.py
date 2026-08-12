@@ -236,3 +236,29 @@ def complete_stage(session: Session, project_id: int, stage_id: int, successor_s
     _activity(session, project_id, "stage_completed", f"完成阶段「{stage.name}」", user_id)
     session.commit()
     return to_dict(stage)
+
+
+def update_stage_owner(session: Session, project_id: int, stage_id: int, new_owner_id: str, updated_by: str) -> dict:
+    """Assign or change stage owner. Only project owners can do this."""
+    _require_owner(session, project_id, updated_by)
+    stage = _stage_or_404(session, project_id, stage_id)
+
+    # Check if new owner is a project member
+    new_owner_member = session.get(ProjectMember, (project_id, new_owner_id))
+    if new_owner_member is None:
+        raise HTTPException(status_code=422, detail="阶段负责人必须是项目成员")
+
+    old_owner_id = stage.owner_id
+    stage.owner_id = new_owner_id
+
+    # Activity
+    from app.db.models import Profile
+    new_owner = session.get(Profile, new_owner_id)
+    if old_owner_id is None:
+        _activity(session, project_id, "stage_owner_changed", f"指定「{new_owner.name}」为阶段「{stage.name}」负责人", updated_by)
+    else:
+        old_owner = session.get(Profile, old_owner_id)
+        _activity(session, project_id, "stage_owner_changed", f"阶段「{stage.name}」负责人从「{old_owner.name}」更换为「{new_owner.name}」", updated_by)
+
+    session.commit()
+    return to_dict(stage)

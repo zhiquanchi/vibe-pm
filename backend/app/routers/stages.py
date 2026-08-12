@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.routers.projects import require_project_member
-from app.schemas.stages import ReorderRequest, StageCompleteRequest, StageCreate, StageStartRequest, StageUpdate
+from app.schemas.stages import ReorderRequest, StageCompleteRequest, StageCreate, StageOwnerRequest, StageStartRequest, StageUpdate
 from app.services import stages as stage_service
 from app.services.stages import DEFAULT_STAGE_TEMPLATE
 
@@ -55,3 +55,8 @@ def set_primary(project_id: int, stage_id: int, user_id: str = Depends(require_p
 @router.post("/projects/{project_id}/stages/{stage_id}/complete")
 def complete_stage(project_id: int, stage_id: int, payload: StageCompleteRequest | None = None, user_id: str = Depends(require_project_member), session: Session = Depends(get_db)):
     return stage_service.complete_stage(session, project_id, stage_id, payload.successor_stage_id if payload else None, user_id)
+
+
+@router.patch("/projects/{project_id}/stages/{stage_id}/owner")
+def update_stage_owner(project_id: int, stage_id: int, payload: StageOwnerRequest, user_id: str = Depends(require_project_member), session: Session = Depends(get_db)):
+    return stage_service.update_stage_owner(session, project_id, stage_id, payload.owner_id, user_id)

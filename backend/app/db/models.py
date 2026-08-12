@@ -30,7 +30,7 @@ class Profile(Base):
 
 class ProjectMember(Base):
     __tablename__ = "project_members"
-    __table_args__ = (CheckConstraint("role IN ('owner','member')"),)
+    __table_args__ = (CheckConstraint("role IN ('owner','member','observer')"),)
 
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("profiles.id", ondelete="CASCADE"), primary_key=True)

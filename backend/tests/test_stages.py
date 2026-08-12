@@ -289,3 +289,93 @@ def test_list_contains_all_fields_and_flags(client):
     # 普通成员也可查看
     client.post(f"/api/projects/{project_id}/members", json={"user_id": "viewer", "name": "观察", "email": "v@test.local"}, headers=OWNER)
     assert client.get(f"/api/projects/{project_id}/stages", headers={"X-User-Id": "viewer"}).status_code == 200
+
+
+# --- 4.5 阶段负责人管理（spec 场景 4.x） ---
+
+
+def test_assign_stage_owner(client):
+    """Test assigning a stage owner."""
+    project_id = create_project(client)
+    stages = list_stages(client, project_id)
+    stage_id = stages[0]["id"]
+
+    # Assign owner
+    response = client.patch(
+        f"/api/projects/{project_id}/stages/{stage_id}/owner",
+        json={"owner_id": "stage-owner"},
+        headers=OWNER,
+    )
+    assert response.status_code == 200
+    assert response.json()["owner_id"] == "stage-owner"
+    assert "stage_owner_changed" in activity_types(project_id)
+
+
+def test_change_stage_owner(client):
+    """Test changing a stage owner to a different member."""
+    project_id = create_project(client)
+
+    # Add another member
+    client.post(
+        f"/api/projects/{project_id}/members",
+        json={"user_id": "member-2", "name": "成员2", "email": "member2@test.local", "role": "member"},
+        headers=OWNER,
+    )
+
+    stages = list_stages(client, project_id)
+    stage_id = stages[0]["id"]
+
+    # Assign first owner
+    client.patch(
+        f"/api/projects/{project_id}/stages/{stage_id}/owner",
+        json={"owner_id": "stage-owner"},
+        headers=OWNER,
+    )
+
+    # Change to second owner
+    response = client.patch(
+        f"/api/projects/{project_id}/stages/{stage_id}/owner",
+        json={"owner_id": "member-2"},
+        headers=OWNER,
+    )
+    assert response.status_code == 200
+    assert response.json()["owner_id"] == "member-2"
+
+
+def test_stage_owner_must_be_project_member(client):
+    """Test that stage owner must be a project member."""
+    project_id = create_project(client)
+    stages = list_stages(client, project_id)
+    stage_id = stages[0]["id"]
+
+    # Try to assign non-member as owner
+    response = client.patch(
+        f"/api/projects/{project_id}/stages/{stage_id}/owner",
+        json={"owner_id": "non-member"},
+        headers=OWNER,
+    )
+    assert response.status_code == 422
+    assert "必须是项目成员" in response.json()["detail"]
+
+
+def test_only_project_owner_can_assign_stage_owner(client):
+    """Test that only project owners can assign stage owners."""
+    project_id = create_project(client)
+
+    # Add a regular member
+    client.post(
+        f"/api/projects/{project_id}/members",
+        json={"user_id": "regular-member", "name": "成员", "email": "member@test.local", "role": "member"},
+        headers=OWNER,
+    )
+
+    stages = list_stages(client, project_id)
+    stage_id = stages[0]["id"]
+
+    # Try to assign owner as regular member
+    response = client.patch(
+        f"/api/projects/{project_id}/stages/{stage_id}/owner",
+        json={"owner_id": "regular-member"},
+        headers={"X-User-Id": "regular-member"},
+    )
+    assert response.status_code == 403

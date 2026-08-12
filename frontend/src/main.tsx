@@ -143,7 +143,110 @@ function BacklogPage({ currentSprint, sprints, onRefresh, onToast }: { currentSp
 
 function ReportPage({ sprint, sprints, onSelect, onToast }: { sprint: Sprint | null; sprints: Sprint[]; onSelect: (id: number) => void; onToast: (message: string) => void }) { const workspace = useSprintWorkspace(sprint?.id || null); const initial = sprint?.initial_points || 0; const final = workspace.snapshots[workspace.snapshots.length - 1]?.total_scope ?? workspace.tasks.reduce((sum, task) => sum + task.story_points, 0); const done = workspace.tasks.filter((task) => task.status === 'done').reduce((sum, task) => sum + task.story_points, 0); const copy = sprint ? `${sprint.name} 报告\n时间：${formatRange(sprint)}\n完成点数：${done} pt\n完成率：${final ? Math.round(done / final * 100) : 0}%\n初始范围：${initial} pt\n最终范围：${final} pt\n范围净变化：${final - initial >= 0 ? '+' : ''}${final - initial} pt\n范围变更：${workspace.scopeChanges.length} 次` : ''; const copySummary = async () => { try { await navigator.clipboard.writeText(copy); onToast('迭代摘要已复制'); } catch { onToast('复制失败，请检查浏览器权限'); } }; return <><PageHeader eyebrow="迭代报告" title="迭代报告" copy="用数据复盘结果、范围和未完成工作。" actions={<><select className="sprint-select" value={sprint?.id || ''} onChange={(event) => onSelect(Number(event.target.value))}>{sprints.map((item) => <option key={item.id} value={item.id}>{item.name} · {statusLabel[item.status]}</option>)}</select><button className="ghost-btn" onClick={() => void copySummary()} disabled={!sprint}>复制摘要</button></>} />{workspace.error ? <ErrorState message={workspace.error} retry={workspace.refresh} /> : sprint ? <><section className="metrics"><Metric label="完成点数" value={`${done} pt`} note={`${final ? Math.round(done / final * 100) : 0}% 完成率`} tone="green" /><Metric label="初始范围" value={`${initial} pt`} note="迭代开始时" tone="blue" /><Metric label="最终范围" value={`${final} pt`} note={`${final - initial >= 0 ? '+' : ''}${final - initial} pt 净变化`} tone="orange" /><Metric label="未完成任务" value={`${workspace.tasks.filter((task) => task.status !== 'done').length} 个`} note={sprint.status === 'completed' ? '已回到 Backlog' : '当前剩余工作'} tone="purple" /></section><div className="report-chart panel"><BurnupChart snapshots={workspace.snapshots} scopeChanges={workspace.scopeChanges} initialPoints={sprint.initial_points} /></div><ScopeTimeline changes={workspace.scopeChanges} /></> : <EmptyState title="请选择一个迭代" copy="报告需要绑定具体迭代。" />}</> }
 
-function MembersPage({ members, isOwner, onRefresh, onToast }: { members: Array<{ id: string; name: string; email: string; role: string }>; isOwner: boolean; onRefresh: () => Promise<void>; onToast: (message: string) => void }) { const [open, setOpen] = useState(false); const [saving, setSaving] = useState(false); const submit = async (event: React.FormEvent<HTMLFormElement>) => { event.preventDefault(); setSaving(true); const form = new FormData(event.currentTarget); try { await apiClient.addMember(projectId, { user_id: String(form.get('email')), name: String(form.get('name')), email: String(form.get('email')), role: 'member' }); await onRefresh(); setOpen(false); onToast('成员已添加'); } catch (error) { onToast(errorText(error)); } finally { setSaving(false); } }; return <><PageHeader eyebrow="TEAM" title="成员" copy="查看项目成员与访问角色。" actions={<button className="primary-btn" disabled={!isOwner} title={!isOwner ? '只有 Owner 可以添加成员' : undefined} onClick={() => setOpen(true)}><Plus size={15} /> 添加成员</button>} /><section className="panel members-page">{members.length ? <div className="member-list">{members.map((member) => <div className="member-row" key={member.id}><div className="avatar avatar-blue">{member.name.slice(0, 2)}</div><div><b>{member.name}</b><small>{member.email}</small></div><span className={`role-tag ${member.role}`}>{member.role === 'owner' ? 'Owner' : 'Member'}</span></div>)}</div> : <EmptyState title="暂无成员" copy="项目成员信息加载后会显示在这里。" />}{!isOwner && <p className="permission-note"><Shield size={14} /> 你是项目成员，只能查看成员列表。</p>}</section>{open && <Modal title="添加成员" close={() => setOpen(false)}><form className="form-stack" onSubmit={submit}><label>姓名<input name="name" required /></label><label>邮箱<input name="email" type="email" required /></label><button className="primary-btn full" disabled={saving}>{saving ? '添加中…' : '添加成员'}</button></form></Modal>}</> }
+function MembersPage({ members, isOwner, onRefresh, onToast }: { members: Array<{ id: string; name: string; email: string; role: string }>; isOwner: boolean; onRefresh: () => Promise<void>; onToast: (message: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [editMember, setEditMember] = useState<{ id: string; name: string; role: string } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const roleLabel: Record<string, string> = { owner: '项目负责人', member: '成员', observer: '观察者' };
+  const roleColor: Record<string, string> = { owner: 'owner', member: 'member', observer: 'observer' };
+
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSaving(true);
+    const form = new FormData(event.currentTarget);
+    try {
+      await apiClient.addMember(projectId, {
+        user_id: String(form.get('user_id')),
+        name: String(form.get('name')),
+        email: String(form.get('email')),
+        role: String(form.get('role')) as 'owner' | 'member' | 'observer'
+      });
+      await onRefresh();
+      setOpen(false);
+      onToast('成员已添加');
+    } catch (error) {
+      onToast(errorText(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateRole = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!editMember) return;
+    setSaving(true);
+    const form = new FormData(event.currentTarget);
+    try {
+      await apiClient.updateMemberRole(projectId, editMember.id, {
+        role: String(form.get('role')) as 'owner' | 'member' | 'observer'
+      });
+      await onRefresh();
+      setEditMember(null);
+      onToast('成员角色已更新');
+    } catch (error) {
+      onToast(errorText(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeMember = async (member: { id: string; name: string }) => {
+    if (!window.confirm(`确定移除成员"${member.name}"吗？`)) return;
+    try {
+      await apiClient.removeMember(projectId, member.id);
+      await onRefresh();
+      onToast('成员已移除');
+    } catch (error) {
+      onToast(errorText(error));
+    }
+  };
+
+  return <>
+    <PageHeader eyebrow="TEAM" title="成员" copy="管理项目成员与访问角色。项目至少需要 2 名负责人。" actions={<button className="primary-btn" disabled={!isOwner} title={!isOwner ? '只有项目负责人可以添加成员' : undefined} onClick={() => setOpen(true)}><Plus size={15} /> 添加成员</button>} />
+    <section className="panel members-page">
+      {members.length ? <div className="table-wrap"><table>
+        <thead><tr><th>成员</th><th>用户标识</th><th>角色</th><th></th></tr></thead>
+        <tbody>{members.map((member) => <tr key={member.id}>
+          <td><div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div className="avatar avatar-blue">{member.name.slice(0, 2)}</div>
+            <div><b>{member.name}</b><small>{member.email}</small></div>
+          </div></td>
+          <td><code>{member.id}</code></td>
+          <td><span className={`role-tag ${roleColor[member.role] || 'member'}`}>{roleLabel[member.role] || member.role}</span></td>
+          <td><div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+            {isOwner && <button className="icon-btn" title="调整角色" onClick={() => setEditMember({ id: member.id, name: member.name, role: member.role })}><Pencil size={14} /></button>}
+            {isOwner && <button className="icon-btn danger" title="移除成员" onClick={() => void removeMember(member)}><Trash2 size={14} /></button>}
+          </div></td>
+        </tr>)}</tbody>
+      </table></div> : <EmptyState title="暂无成员" copy="项目成员信息加载后会显示在这里。" />}
+      {!isOwner && <p className="permission-note"><Shield size={14} /> 你是项目成员，只能查看成员列表。</p>}
+    </section>
+    {open && <Modal title="添加成员" close={() => setOpen(false)}>
+      <form className="form-stack" onSubmit={submit}>
+        <label>用户标识<input name="user_id" required placeholder="user-123" /></label>
+        <label>姓名<input name="name" required placeholder="张三" /></label>
+        <label>邮箱<input name="email" type="email" required placeholder="zhangsan@example.com" /></label>
+        <label>角色<select name="role" defaultValue="member">
+          <option value="owner">项目负责人 (Owner)</option>
+          <option value="member">成员 (Member)</option>
+          <option value="observer">观察者 (Observer)</option>
+        </select></label>
+        <button className="primary-btn full" disabled={saving}>{saving ? '添加中…' : '添加成员'}</button>
+      </form>
+    </Modal>}
+    {editMember && <Modal title={`调整"${editMember.name}"的角色`} close={() => setEditMember(null)}>
+      <form className="form-stack" onSubmit={updateRole}>
+        <label>角色<select name="role" defaultValue={editMember.role}>
+          <option value="owner">项目负责人 (Owner)</option>
+          <option value="member">成员 (Member)</option>
+          <option value="observer">观察者 (Observer)</option>
+        </select></label>
+        <p className="permission-note"><CircleHelp size={14} /> 项目负责人可以管理成员和修改设置，成员可以管理任务和迭代，观察者只能查看。</p>
+        <button className="primary-btn full" disabled={saving}>{saving ? '保存中…' : '保存角色'}</button>
+      </form>
+    </Modal>}
+  </>;
+}
 function IntegrationsPage() { return <><PageHeader eyebrow="PROJECT CONNECTIONS" title="集成" copy="查看项目可用的自动化连接能力。" /><section className="integration-grid"><div className="panel integration-card"><div className="integration-icon"><GitBranch size={22} /></div><div className="integration-copy"><div><h2>GitHub</h2><span className="status-pill planning">MVP-2</span></div><p>提交、Pull Request 与任务进度自动关联。</p><small>连接能力将在 MVP-2 提供，当前不会伪造 OAuth 或已连接状态。</small></div><button className="ghost-btn" disabled title="GitHub 集成将在 MVP-2 提供">连接 GitHub</button></div><div className="panel manual-card"><Zap size={18} /><div><b>手动更新仍然可用</b><p>你可以继续通过看板、Backlog 和范围时间线管理任务与进度。</p></div></div></section></> }
 function SettingsPage({ project, isOwner, onSaved, onToast }: { project: { id: number; name: string; description: string | null } | null; isOwner: boolean; onSaved: (value: { id: number; name: string; description: string | null }) => void; onToast: (message: string) => void }) { const [name, setName] = useState(project?.name || ''); const [description, setDescription] = useState(project?.description || ''); const [cycle, setCycle] = useState('2'); const [dirty, setDirty] = useState(false); const [saving, setSaving] = useState(false); useEffect(() => { setName(project?.name || ''); setDescription(project?.description || ''); }, [project]); useEffect(() => { const guard = (event: BeforeUnloadEvent) => { if (dirty) event.preventDefault(); }; window.addEventListener('beforeunload', guard); return () => window.removeEventListener('beforeunload', guard); }, [dirty]); const save = async (event: React.FormEvent) => { event.preventDefault(); setSaving(true); try { const value = await apiClient.updateProject(projectId, { name, description, default_sprint_weeks: Number(cycle) as 1 | 2 }); onSaved(value); setDirty(false); } catch (error) { onToast(errorText(error)); } finally { setSaving(false); } }; return <><PageHeader eyebrow="PROJECT SETTINGS" title="设置" copy="管理项目基本信息与默认迭代周期。" /><section className="panel settings-page"><form className="settings-form" onSubmit={save}><div className="settings-section"><h2>基本信息</h2><p>这些信息会显示在项目顶栏和工作区选择器中。</p><label>项目名称<input value={name} onChange={(event) => { setName(event.target.value); setDirty(true); }} disabled={!isOwner} /></label><label>项目描述<textarea value={description} onChange={(event) => { setDescription(event.target.value); setDirty(true); }} disabled={!isOwner} /></label></div><div className="settings-section"><h2>迭代默认周期</h2><p>新建迭代时使用的默认时间长度。</p><div className="segmented wide"><button type="button" className={cycle === '1' ? 'selected' : ''} onClick={() => { setCycle('1'); setDirty(true); }}>1 周</button><button type="button" className={cycle === '2' ? 'selected' : ''} onClick={() => { setCycle('2'); setDirty(true); }}>2 周</button></div></div>{!isOwner && <div className="permission-note"><Shield size={14} /> 只有项目 Owner 可以修改设置，当前字段为只读。</div>}<div className="settings-actions"><button type="button" className="ghost-btn" onClick={() => { if (dirty && !window.confirm('有未保存的修改，确定取消吗？')) return; setName(project?.name || ''); setDescription(project?.description || ''); setDirty(false); }}>取消</button><button className="primary-btn" disabled={!isOwner || !dirty || saving}>{saving ? '保存中…' : '保存设置'}</button></div></form></section></> }
 function validateStages(stages: StageTemplateItem[]): string | null { if (!stages.length) return '项目必须至少保留一个阶段'; const names = stages.map((item) => item.name.trim()); if (names.some((name) => !name)) return '阶段名称不能为空'; if (new Set(names).size !== names.length) return '同一项目内阶段名称不能重复'; return null; }
@@ -246,7 +349,7 @@ function StageFormModal({ routeProjectId, members, stage, onClose, onSaved, relo
   return <Modal title={stage ? `编辑阶段「${stage.name}」` : '新增阶段'} close={onClose}><form className="form-stack" onSubmit={submit}>
     <label>阶段名称<input name="name" defaultValue={stage?.name || ''} required disabled={completed} title={completed ? '已完成阶段不能重命名' : undefined} /></label>
     <label>阶段目标<input name="goal" defaultValue={stage?.goal || ''} placeholder="这个阶段要达成什么？" /></label>
-    <label>负责人<select name="owner_id" defaultValue={stage?.owner_id || ''}><option value="">未指定</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
+    <label>负责人<select name="owner_id" defaultValue={stage?.owner_id || ''}><option value="">未指定</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name} ({member.email})</option>)}</select></label>
     <div className="form-grid"><label>计划开始<input name="planned_start" type="date" defaultValue={stage?.planned_start || ''} /></label><label>计划结束<input name="planned_end" type="date" defaultValue={stage?.planned_end || ''} /></label></div>
     <button className="primary-btn full" disabled={saving}>{saving ? '保存中…' : stage ? '保存修改' : '新增阶段'}</button>
   </form></Modal>;

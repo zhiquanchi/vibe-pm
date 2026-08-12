@@ -144,6 +144,30 @@ def _apply_legacy_column_patches(session: Session) -> None:
     if "scope_change_id" not in snapshot_columns:
         session.execute(text("ALTER TABLE sprint_snapshots ADD COLUMN scope_change_id INTEGER"))
 
+    # Migrate project_members role constraint to support observer
+    # SQLite doesn't support ALTER TABLE ... DROP CONSTRAINT, so we check if observer is already supported
+    try:
+        # Test if observer role is accepted by trying to query with it
+        session.execute(text("SELECT 1 FROM project_members WHERE role = 'observer' LIMIT 1"))
+    except Exception:
+        # If observer role causes constraint violation, we need to recreate the table
+        # This is a complex migration, so we'll use a temporary table approach
+        session.execute(text("""
+            CREATE TABLE project_members_new (
+                project_id INTEGER NOT NULL,
+                user_id TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'member',
+                PRIMARY KEY (project_id, user_id),
+                FOREIGN KEY(project_id) REFERENCES projects (id) ON DELETE CASCADE,
+                FOREIGN KEY(user_id) REFERENCES profiles (id) ON DELETE CASCADE,
+                CHECK (role IN ('owner','member','observer'))
+            )
+        """))
+        session.execute(text("INSERT INTO project_members_new SELECT * FROM project_members"))
+        session.execute(text("DROP TABLE project_members"))
+        session.execute(text("ALTER TABLE project_members_new RENAME TO project_members"))
+        session.commit()
+
 
 def init_db(seed: bool = True) -> None:
     engine = get_engine()

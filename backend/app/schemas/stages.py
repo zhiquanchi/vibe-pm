@@ -45,6 +45,10 @@ class StageCompleteRequest(BaseModel):
     successor_stage_id: int | None = Field(default=None, ge=1)
 
 
+class StageOwnerRequest(BaseModel):
+    owner_id: str = Field(min_length=1)
+
+
 def validate_stage_items(items: list[StageTemplateItem]) -> list[StageTemplateItem]:
     """Project-level stage list rules: at least one stage, unique names."""
     if not items:
