@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -9,6 +9,10 @@ from pydantic import BaseModel, Field
 StoryPoints = Literal[1, 2, 3, 5, 8, 13]
 TaskStatus = Literal["todo", "in_progress", "in_review", "done"]
 Priority = Literal["P0", "P1", "P2", "P3"]
+
+# PRD-03: stage-task priority vocabulary (紧急/重要/正常/低).
+StageTaskStatus = Literal["todo", "in_progress", "blocked", "pending_verification", "done"]
+StageTaskPriority = Literal["urgent", "important", "normal", "low"]
 
 
 class TaskCreateRequest(BaseModel):
@@ -52,3 +56,41 @@ class TaskResponse(BaseModel):
     created_at: datetime | str
     updated_at: datetime | str
     completed_at: datetime | str | None = None
+
+
+# --- PRD-03: stage-based task schemas ---
+
+
+class TaskCreate(BaseModel):
+    """Create a task inside a stage (PRD-03)."""
+
+    project_id: int
+    stage_id: int | None = None
+    title: str = Field(min_length=1)
+    description: str | None = None
+    status: StageTaskStatus = "todo"
+    priority: StageTaskPriority = "normal"
+    assignee: str | None = None
+    planned_date: date | None = None
+    created_by: str = "current-user"
+
+
+class TaskUpdate(BaseModel):
+    """Edit a stage task (PRD-03). All fields optional; empty title rejected."""
+
+    title: str | None = Field(default=None, min_length=1)
+    description: str | None = None
+    status: StageTaskStatus | None = None
+    priority: StageTaskPriority | None = None
+    assignee: str | None = None
+    planned_date: date | None = None
+    position: int | None = Field(default=None, ge=0)
+    reason: str | None = None
+    created_by: str = "current-user"
+
+
+class TaskMoveRequest(BaseModel):
+    """Move a task to another (unfinished) stage, or set it unplanned."""
+
+    target_stage_id: int | None = None
+    reason: str | None = None

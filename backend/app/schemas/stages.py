@@ -49,6 +49,20 @@ class StageOwnerRequest(BaseModel):
     owner_id: str = Field(min_length=1)
 
 
+# --- PRD-03: filters for the stage task workbench ---
+
+
+class TaskListFilters(BaseModel):
+    """Query filters for the stage task list view."""
+
+    status: str | None = None
+    priority: str | None = None
+    assignee: str | None = None
+    search: str | None = None
+    # sort: created_at | planned_date | priority  (prefix with '-' for descending)
+    sort: str | None = "created_at"
+
+
 def validate_stage_items(items: list[StageTemplateItem]) -> list[StageTemplateItem]:
     """Project-level stage list rules: at least one stage, unique names."""
     if not items:
