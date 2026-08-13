@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   Area,
   CartesianGrid,
@@ -10,8 +10,17 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import type { ScopeChange, SprintSnapshot } from '../types';
+import type { ScopeChange, ScopeChangeType, SprintSnapshot } from '../types';
 import './BurnupChart.css';
+
+const changeTypeLabel = (type: ScopeChangeType): string => {
+  switch (type) {
+    case 'add_task': return '新增需求';
+    case 'remove_task': return '移出需求';
+    case 'change_points': return '调整点数';
+    default: return '范围变更';
+  }
+};
 
 type ChartMode = 'burnup' | 'burndown';
 
@@ -86,6 +95,8 @@ function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: 
 
 export function BurnupChart({ snapshots, scopeChanges = [], initialPoints, className = '', onSelectChange }: BurnupChartProps) {
   const [mode, setMode] = useState<ChartMode>('burnup');
+  const [hovered, setHovered] = useState<{ change: ScopeChange; x: number; y: number } | null>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
   const points = useMemo(() => buildPoints(snapshots, initialPoints), [snapshots, initialPoints]);
   const latest = points[points.length - 1];
   const first = points[0];
@@ -101,6 +112,7 @@ export function BurnupChart({ snapshots, scopeChanges = [], initialPoints, class
       return { change, point };
     }).filter((value): value is { change: ScopeChange; point: ChartPoint } => value !== null);
   }, [points, scopeChanges]);
+  const changeByLabel = useMemo(() => new Map(markers.map(({ change, point }) => [point.label, change])), [markers]);
 
   if (!points.length) {
     return (
@@ -119,7 +131,7 @@ export function BurnupChart({ snapshots, scopeChanges = [], initialPoints, class
       <div className="burnup-chart-header">
         <div>
           <h2>范围与进度</h2>
-          <p>每日快照 · 点击变更点查看范围调整</p>
+          <p>每日快照 · 悬停或点击变更点查看范围调整</p>
         </div>
         <div className="burnup-chart-toggle" role="group" aria-label="图表类型">
           <button className={mode === 'burnup' ? 'active' : ''} onClick={() => setMode('burnup')} type="button">燃起图</button>
@@ -133,14 +145,28 @@ export function BurnupChart({ snapshots, scopeChanges = [], initialPoints, class
         <span><i className="legend-dot" />范围变更</span>
       </div>
 
-      <div className="burnup-chart-canvas">
+      <div className="burnup-chart-canvas" ref={canvasRef}>
         <ResponsiveContainer width="100%" height={300}>
-          <ComposedChart data={points} margin={{ top: 12, right: 12, bottom: 0, left: -18 }}>
+          <ComposedChart
+            data={points}
+            margin={{ top: 12, right: 12, bottom: 0, left: -18 }}
+            onMouseMove={(state, event) => {
+              const label = state?.activeLabel;
+              const change = label != null ? changeByLabel.get(String(label)) : undefined;
+              const rect = canvasRef.current?.getBoundingClientRect();
+              if (change && event && rect) {
+                setHovered({ change, x: event.clientX - rect.left, y: event.clientY - rect.top });
+              } else {
+                setHovered(null);
+              }
+            }}
+            onMouseLeave={() => setHovered(null)}
+          >
             <defs><linearGradient id="burnup-completed-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#22c55e" stopOpacity={0.24} /><stop offset="100%" stopColor="#22c55e" stopOpacity={0} /></linearGradient></defs>
             <CartesianGrid vertical={false} stroke="#edf0f4" />
             <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: '#8d96a5', fontSize: 11 }} />
             <YAxis axisLine={false} tickLine={false} tick={{ fill: '#8d96a5', fontSize: 11 }} allowDecimals={false} />
-            <Tooltip content={<ChartTooltip />} />
+            {!hovered && <Tooltip content={<ChartTooltip />} />}
             {mode === 'burnup' ? <>
               <Area type="monotone" dataKey="completed" stroke="none" fill="url(#burnup-completed-fill)" />
               <Line type="monotone" dataKey="completed" name="已完成" stroke="#22c55e" strokeWidth={3} dot={false} />
@@ -150,9 +176,40 @@ export function BurnupChart({ snapshots, scopeChanges = [], initialPoints, class
               <Line type="monotone" dataKey="remaining" name="剩余" stroke="#ef4444" strokeWidth={3} dot={false} />
               <Line type="monotone" dataKey="idealRemaining" name="理想剩余" stroke="#9ca3af" strokeDasharray="5 5" strokeWidth={1.5} dot={false} />
             </>}
-            {markers.map(({ change, point }) => <ReferenceDot key={change.id} x={point.label} y={mode === 'burnup' ? point.scope : point.remaining} r={5} fill={change.points_delta >= 0 ? '#ef4444' : '#22c55e'} stroke="#fff" strokeWidth={2} onClick={() => onSelectChange?.(change)} aria-label={`查看范围变更：${change.description}`} />)}
+            {markers.map(({ change, point }) => (
+              <ReferenceDot
+                key={change.id}
+                x={point.label}
+                y={mode === 'burnup' ? point.scope : point.remaining}
+                r={6}
+                fill={change.points_delta >= 0 ? '#ef4444' : '#22c55e'}
+                stroke="#fff"
+                strokeWidth={2}
+                style={{ cursor: 'pointer' }}
+                onClick={() => onSelectChange?.(change)}
+                aria-label={`查看范围变更：${change.description}`}
+              />
+            ))}
           </ComposedChart>
         </ResponsiveContainer>
+        {hovered && (() => {
+          const above = hovered.y > 130;
+          return (
+            <div
+              className={`burnup-change-tip ${above ? 'above' : 'below'}`}
+              style={{ left: hovered.x, top: hovered.y }}
+              role="tooltip"
+            >
+              <div className="burnup-change-tip-head">
+                <span className={`burnup-change-tag ${hovered.change.type}`}>{changeTypeLabel(hovered.change.type)}</span>
+                <b className={hovered.change.points_delta >= 0 ? 'up' : 'down'}>{formatDelta(hovered.change.points_delta)}</b>
+              </div>
+              <p className="burnup-change-tip-desc">{hovered.change.description}</p>
+              {hovered.change.reason && <p className="burnup-change-tip-reason">原因：{hovered.change.reason}</p>}
+              <p className="burnup-change-tip-meta">{hovered.change.created_by} · {formatDate(hovered.change.created_at.slice(0, 10))}</p>
+            </div>
+          );
+        })()}
       </div>
 
       <div className="burnup-chart-summary">
