@@ -40,7 +40,8 @@ class ProjectMember(Base):
 class Stage(Base):
     __tablename__ = "stages"
     __table_args__ = (
-        CheckConstraint("status IN ('planned','active','completed')"),
+        # PRD-04: stages may be 'blocked' (阻塞).
+        CheckConstraint("status IN ('planned','active','completed','blocked')"),
         # At most one primary stage per project, enforced at the database level.
         Index("uq_stages_primary", "project_id", unique=True, sqlite_where=text("is_primary = 1")),
         Index("idx_stages_project", "project_id", "position"),
@@ -143,3 +144,49 @@ class SprintSnapshot(Base):
     ideal_completed: Mapped[float | None] = mapped_column(Float)
     ideal_remaining: Mapped[float | None] = mapped_column(Float)
     scope_change_id: Mapped[int | None] = mapped_column(Integer)
+
+
+# --- PRD-04: task dependency & blocker tables ---
+
+
+class TaskDependency(Base):
+    __tablename__ = "task_dependencies"
+    __table_args__ = (
+        UniqueConstraint("task_id", "dependency_id"),
+        Index("idx_task_dependencies_task", "task_id"),
+        Index("idx_task_dependencies_dependency", "dependency_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
+    dependency_id: Mapped[int] = mapped_column(ForeignKey("tasks.id"), nullable=False)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class TaskBlocker(Base):
+    __tablename__ = "task_blockers"
+    __table_args__ = (Index("idx_task_blockers_task", "task_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
+    reason: Mapped[str] = mapped_column(String, nullable=False)
+    handler_id: Mapped[str | None] = mapped_column(ForeignKey("profiles.id"))
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    resolved_at: Mapped[str | None] = mapped_column(String)
+    resolution: Mapped[str | None] = mapped_column(String)
+
+
+class StageBlocker(Base):
+    __tablename__ = "stage_blockers"
+    __table_args__ = (Index("idx_stage_blockers_stage", "stage_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    stage_id: Mapped[int] = mapped_column(ForeignKey("stages.id", ondelete="CASCADE"), nullable=False)
+    reason: Mapped[str] = mapped_column(String, nullable=False)
+    handler_id: Mapped[str | None] = mapped_column(ForeignKey("profiles.id"))
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    resolved_at: Mapped[str | None] = mapped_column(String)
+    resolution: Mapped[str | None] = mapped_column(String)
+    previous_stage_status: Mapped[str | None] = mapped_column(String)

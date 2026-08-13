@@ -94,3 +94,37 @@ class TaskMoveRequest(BaseModel):
 
     target_stage_id: int | None = None
     reason: str | None = None
+
+
+# --- PRD-04: dependency & blocker schemas ---
+
+
+class TaskDependencyCreate(BaseModel):
+    dependency_id: int
+    created_by: str = "current-user"
+
+
+class TaskBlockerCreate(BaseModel):
+    reason: str = Field(min_length=1)
+    handler_id: str | None = None
+    created_by: str = "current-user"
+
+
+class TaskBlockerResolve(BaseModel):
+    resolution: str = Field(min_length=1)
+
+
+class StageBlockerCreate(BaseModel):
+    reason: str = Field(min_length=1)
+    handler_id: str | None = None
+    created_by: str = "current-user"
+
+
+class StageBlockerResolve(BaseModel):
+    resolution: str = Field(min_length=1)
+
+
+class ConfirmBlockerRequest(BaseModel):
+    action: Literal["continue", "reblock"]
+    reason: str | None = None
+    handler_id: str | None = None
