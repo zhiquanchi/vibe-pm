@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
+from app.core.identity import current_user_id
 from app.db.database import get_db
 from app.domains.tasks import create_task, delete_task, list_tasks, update_task
 from app.routers.projects import require_project_member
@@ -72,3 +73,16 @@ def move_stage_task(project_id: int, task_id: int, payload: TaskMoveRequest, use
 @router.delete("/projects/{project_id}/tasks/{task_id}")
 def delete_stage_task(project_id: int, task_id: int, user_id: str = Depends(require_project_member), session: Session = Depends(get_db)):
     return task_service.delete_task(session, project_id, task_id, user_id)
+
+
+@router.get("/my-tasks")
+def my_tasks(
+    project_id: int | None = Query(default=None),
+    stage_id: int | None = Query(default=None),
+    status: str | None = Query(default=None),
+    priority: str | None = Query(default=None),
+    sort: str = Query(default="planned_date"),
+    user_id: str = Depends(current_user_id),
+    session: Session = Depends(get_db),
+):
+    return task_service.list_my_tasks(session, user_id, project_id=project_id, stage_id=stage_id, status=status, priority=priority, sort=sort)
