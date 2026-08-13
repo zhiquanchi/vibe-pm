@@ -155,7 +155,7 @@ export interface MemberUpdateInput {
   role: 'owner' | 'member' | 'observer';
 }
 
-export type StageStatus = 'planned' | 'active' | 'completed';
+export type StageStatus = 'planned' | 'active' | 'blocked' | 'completed';
 
 export interface Stage {
   id: number;
@@ -257,4 +257,59 @@ export interface MyTask extends StageTask {
 export interface ApiErrorShape {
   detail?: string | Array<{ msg?: string }> | StageDeletePreview;
   message?: string;
+}
+
+// --- PRD-04: task dependencies & blockers ---
+
+export interface TaskDependency {
+  id: number;
+  task_id: number;
+  dependency_id: number;
+  created_by: string;
+  created_at: string;
+  /** 前置任务摘要（含 id/title/status） */
+  dependency: { id: number; title: string; status: StageTaskStatus };
+}
+
+export interface TaskBlocker {
+  id: number;
+  task_id: number;
+  reason: string;
+  handler_id: string;
+  created_by: string;
+  created_at: string;
+  resolved_at: string | null;
+  resolution: string | null;
+}
+
+export interface StageBlocker {
+  id: number;
+  stage_id: number;
+  reason: string;
+  handler_id: string;
+  created_by: string;
+  created_at: string;
+  resolved_at: string | null;
+  resolution: string | null;
+}
+
+export interface TaskDependencyCreate {
+  dependency_id: number;
+  created_by?: string;
+}
+
+export interface BlockerCreate {
+  reason: string;
+  handler_id: string;
+  created_by?: string;
+}
+
+export interface BlockerResolve {
+  resolution: string;
+}
+
+export interface ConfirmBlockerInput {
+  action: 'continue' | 'reblock';
+  reason?: string;
+  handler_id?: string;
 }

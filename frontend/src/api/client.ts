@@ -14,6 +14,13 @@ import type {
   StageTask,
   MyTask,
   Task,
+  TaskDependency,
+  TaskBlocker,
+  StageBlocker,
+  TaskDependencyCreate,
+  BlockerCreate,
+  BlockerResolve,
+  ConfirmBlockerInput,
   TaskCreate,
   TaskCreateInput,
   TaskMoveRequest,
@@ -159,6 +166,39 @@ export class ApiClient {
     if (params.sort) query.set('sort', params.sort);
     const qs = query.toString();
     return this.get<MyTask[]>(`/my-tasks${qs ? `?${qs}` : ''}`, signal);
+  }
+
+  // --- PRD-04: task dependencies & blockers ---
+
+  listTaskDependencies(projectId: number, taskId: number, signal?: AbortSignal) {
+    return this.get<TaskDependency[]>(`/projects/${projectId}/tasks/${taskId}/dependencies`, signal);
+  }
+  addTaskDependency(projectId: number, taskId: number, input: TaskDependencyCreate) {
+    return this.post<TaskDependency>(`/projects/${projectId}/tasks/${taskId}/dependencies`, input);
+  }
+  removeTaskDependency(projectId: number, taskId: number, dependencyId: number) {
+    return this.delete<{ deleted: boolean }>(`/projects/${projectId}/tasks/${taskId}/dependencies/${dependencyId}`);
+  }
+  listTaskBlockers(projectId: number, taskId: number, signal?: AbortSignal) {
+    return this.get<TaskBlocker[]>(`/projects/${projectId}/tasks/${taskId}/blockers`, signal);
+  }
+  addTaskBlocker(projectId: number, taskId: number, input: BlockerCreate) {
+    return this.post<TaskBlocker>(`/projects/${projectId}/tasks/${taskId}/blockers`, input);
+  }
+  resolveTaskBlocker(projectId: number, taskId: number, blockerId: number, input: BlockerResolve) {
+    return this.patch<TaskBlocker>(`/projects/${projectId}/tasks/${taskId}/blockers/${blockerId}`, input);
+  }
+  listStageBlockers(projectId: number, stageId: number, signal?: AbortSignal) {
+    return this.get<StageBlocker[]>(`/projects/${projectId}/stages/${stageId}/blockers`, signal);
+  }
+  addStageBlocker(projectId: number, stageId: number, input: BlockerCreate) {
+    return this.post<StageBlocker>(`/projects/${projectId}/stages/${stageId}/blockers`, input);
+  }
+  resolveStageBlocker(projectId: number, stageId: number, blockerId: number, input: BlockerResolve) {
+    return this.patch<StageBlocker>(`/projects/${projectId}/stages/${stageId}/blockers/${blockerId}`, input);
+  }
+  confirmBlocker(projectId: number, taskId: number, input: ConfirmBlockerInput) {
+    return this.post<StageTask>(`/projects/${projectId}/tasks/${taskId}/confirm-blocker`, input);
   }
 }
 

@@ -12,4 +12,19 @@
 .status-pill.done{background:#e7f6ec;color:#2e9e54}
 .flag-overdue{background:#fdecec;color:#c65353;border-radius:6px;padding:2px 7px;font-size:11px;font-weight:600;margin-left:6px}
 .flag-blocked{background:#fff3e0;color:#b8791f;border-radius:6px;padding:2px 7px;font-size:11px;font-weight:600;margin-left:6px}
+.flag-pending{background:#efeaff;color:#7056df;border-radius:6px;padding:2px 7px;font-size:11px;font-weight:600;margin-left:6px}
+.task-detail{display:flex;flex-direction:column;gap:18px;max-height:70vh;overflow:auto}
+.detail-section{display:flex;flex-direction:column;gap:8px}
+.detail-section h3{margin:0;font-size:13px;color:var(--ink)}
+.detail-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.detail-list li{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;background:#f7f8fa;border:1px solid var(--border);border-radius:8px;padding:9px 11px}
+.detail-list li b{font-size:13px;font-weight:600;color:var(--ink)}
+.detail-list li small{display:block;font-size:11px;color:var(--muted);margin-top:3px}
+.detail-list li .resolved{color:#2e9e54}
+.detail-list li .unresolved{color:#c65353}
+.detail-list li>div{display:flex;flex-direction:column;gap:4px}
+.add-dep{display:flex;gap:8px}
+.add-dep select{flex:1;border:1px solid var(--border);border-radius:7px;padding:8px 10px;font-size:13px;background:#fff}
+.detail-form{display:flex;flex-direction:column;gap:8px;background:#f7f8fa;border:1px solid var(--border);border-radius:8px;padding:11px}
+.primary-btn.small,.ghost-btn.small{flex:0 0 auto}
 .link{color:#5e4bcc;text-decoration:none}.link:hover{text-decoration:underline}
