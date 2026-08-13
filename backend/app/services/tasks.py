@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.db.models import ProjectActivity, ProjectMember, Stage, Task
+from app.db.models import Project, ProjectActivity, ProjectMember, Stage, Task
 from app.services.common import to_dict
 
 
@@ -219,3 +219,83 @@ def delete_task(session: Session, project_id: int, task_id: int, user_id: str) -
     _activity(session, project_id, "task_deleted", f"删除任务「{title}」", user_id)
     session.commit()
     return {"deleted": True}
+
+
+# Priority rank used for sorting (urgent first). Unknown values sort last.
+PRIORITY_ORDER = {"urgent": 0, "important": 1, "normal": 2, "low": 3}
+
+
+def list_stage_tasks(session: Session, project_id: int, stage_id: int, filters) -> list[dict]:
+    """Stage workbench: list tasks with filtering and sorting (PRD-03 5.1)."""
+    stmt = select(Task).where(Task.project_id == project_id, Task.stage_id == stage_id)
+    if filters.status:
+        stmt = stmt.where(Task.status == filters.status)
+    if filters.priority:
+        stmt = stmt.where(Task.priority == filters.priority)
+    if filters.assignee:
+        stmt = stmt.where(Task.assignee == filters.assignee)
+    if filters.search:
+        stmt = stmt.where(Task.title.like(f"%{filters.search}%"))
+
+    sort = filters.sort or "created_at"
+    desc = sort.startswith("-")
+    field = sort[1:] if desc else sort
+    if field == "priority":
+        tasks = session.scalars(stmt).all()
+        tasks.sort(key=lambda t: PRIORITY_ORDER.get(t.priority, 99), reverse=desc)
+    else:
+        column = Task.planned_date if field == "planned_date" else Task.created_at
+        stmt = stmt.order_by(column.desc() if desc else column)
+        tasks = session.scalars(stmt).all()
+    return [to_dict(task) for task in tasks]
+
+
+def list_my_tasks(
+    session: Session,
+    user_id: str,
+    *,
+    project_id: int | None = None,
+    stage_id: int | None = None,
+    status: str | None = None,
+    priority: str | None = None,
+    sort: str = "planned_date",
+) -> list[dict]:
+    """Cross-project unfinished tasks assigned to the user (PRD-03 5.2)."""
+    member_ids = select(ProjectMember.project_id).where(ProjectMember.user_id == user_id)
+    stmt = (
+        select(Task, Project.name, Stage.name)
+        .join(Project, Project.id == Task.project_id)
+        .outerjoin(Stage, Stage.id == Task.stage_id)
+        .where(Task.assignee == user_id)
+        .where(Task.project_id.in_(member_ids))
+        .where(Task.status != "done")
+    )
+    if project_id is not None:
+        stmt = stmt.where(Task.project_id == project_id)
+    if stage_id is not None:
+        stmt = stmt.where(Task.stage_id == stage_id)
+    if status is not None:
+        stmt = stmt.where(Task.status == status)
+    if priority is not None:
+        stmt = stmt.where(Task.priority == priority)
+
+    rows = session.execute(stmt).all()
+    today = date.today().isoformat()
+    result: list[dict] = []
+    for task, project_name, stage_name in rows:
+        item = to_dict(task)
+        item["project_name"] = project_name
+        item["stage_name"] = stage_name
+        item["overdue"] = bool(task.planned_date and task.planned_date < today and task.status != "done")
+        item["blocked"] = task.status == "blocked"
+        result.append(item)
+
+    desc = sort.startswith("-")
+    field = sort[1:] if desc else sort
+    if field == "priority":
+        result.sort(key=lambda d: PRIORITY_ORDER.get(d.get("priority"), 99), reverse=desc)
+    elif field == "created_at":
+        result.sort(key=lambda d: d.get("created_at") or "", reverse=desc)
+    else:  # planned_date
+        result.sort(key=lambda d: d.get("planned_date") or "9999-12-31", reverse=desc)
+    return result
