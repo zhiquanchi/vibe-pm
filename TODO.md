@@ -6,12 +6,12 @@ PRD-03「阶段任务管理」已完成并逐任务提交。以下为剩余待�
 
 ## 待办（按顺序）
 
-### 1. PRD-04 `add-task-dependencies-and-blockers` — 任务依赖与阻塞
-- [ ] 数据模型：`task_dependencies`、`task_blockers`、`stage_blockers` 表
-- [ ] 服务层：添加/移除前置依赖（循环依赖校验）、标记/解除任务阻塞、标记/解除阶段阻塞、确认阻塞已解除
-- [ ] 补全 PRD-03 删除任务时预留的「被依赖」拦截接入点（`_guard_delete`）
-- [ ] 路由：依赖/阻塞的增删查端点
-- [ ] 后端测试 + 前端扩展（任务详情页依赖/阻塞，阶段详情页阻塞）
+### 1. PRD-04 `add-task-dependencies-and-blockers` — 任务依赖与阻塞 ✅ 已完成
+- [x] 数据模型：`task_dependencies`、`task_blockers`、`stage_blockers` 表
+- [x] 服务层：添加/移除前置依赖（循环依赖校验）、标记/解除任务阻塞、标记/解除阶段阻塞、确认阻塞已解除
+- [x] 补全 PRD-03 删除任务时预留的「被依赖」拦截接入点（`_guard_delete`）
+- [x] 路由：依赖/阻塞的增删查端点
+- [x] 后端测试 + 前端扩展（任务详情页依赖/阻塞，阶段详情页阻塞）
 
 ### 2. PRD-05 `add-stage-deliverables-and-acceptance` — 阶段交付物与验收
 - [ ] 数据模型：`stage_deliverables`、`stage_acceptances` 表
