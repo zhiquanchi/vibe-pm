@@ -291,3 +291,227 @@ def test_my_tasks_empty_for_user_with_no_tasks(client):
     create_project(client, stages=[{"name": "开发"}])
     body = client.get("/api/my-tasks", headers={"X-User-Id": "someone-else"}).json()
     assert body == []
+
+
+# --- PRD-04: 任务依赖与阻塞 (spec 1.x / 3.x / 4.x / 5.x) ---
+
+
+def _get_stage(client, project_id, stage_id, headers=OWNER):
+    stages = client.get(f"/api/projects/{project_id}/stages", headers=headers).json()
+    return next(s for s in stages if s["id"] == stage_id)
+
+
+def test_add_task_dependency_success(client):
+    project_id = create_project(client, stages=[{"name": "开发"}])
+    stage_id = list_stages(client, project_id)[0]["id"]
+    a = create_task(client, project_id, stage_id, title="A").json()["id"]
+    b = create_task(client, project_id, stage_id, title="B").json()["id"]
+
+    resp = client.post(f"/api/projects/{project_id}/tasks/{a}/dependencies", json={"dependency_id": b}, headers=OWNER)
+    assert resp.status_code == 201
+    assert "task_dependency_added" in activity_types(project_id)
+
+    listed = client.get(f"/api/projects/{project_id}/tasks/{a}/dependencies", headers=OWNER).json()
+    assert len(listed) == 1
+    assert listed[0]["dependency"]["id"] == b
+    assert listed[0]["dependency"]["title"] == "B"
+    assert "status" in listed[0]["dependency"]
+
+
+def test_self_dependency_rejected(client):
+    project_id = create_project(client, stages=[{"name": "开发"}])
+    stage_id = list_stages(client, project_id)[0]["id"]
+    a = create_task(client, project_id, stage_id, title="A").json()["id"]
+
+    resp = client.post(f"/api/projects/{project_id}/tasks/{a}/dependencies", json={"dependency_id": a}, headers=OWNER)
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == "任务不能依赖自身"
+
+
+def test_direct_cycle_dependency_rejected(client):
+    project_id = create_project(client, stages=[{"name": "开发"}])
+    stage_id = list_stages(client, project_id)[0]["id"]
+    a = create_task(client, project_id, stage_id, title="A").json()["id"]
+    b = create_task(client, project_id, stage_id, title="B").json()["id"]
+
+    # A depends on B.
+    assert client.post(f"/api/projects/{project_id}/tasks/{a}/dependencies", json={"dependency_id": b}, headers=OWNER).status_code == 201
+    # Now B depends on A -> direct cycle.
+    resp = client.post(f"/api/projects/{project_id}/tasks/{b}/dependencies", json={"dependency_id": a}, headers=OWNER)
+    assert resp.status_code == 422
+    assert "检测到循环依赖：A → B → A" in resp.json()["detail"]
+
+
+def test_indirect_cycle_dependency_rejected(client):
+    project_id = create_project(client, stages=[{"name": "开发"}])
+    stage_id = list_stages(client, project_id)[0]["id"]
+    a = create_task(client, project_id, stage_id, title="A").json()["id"]
+    b = create_task(client, project_id, stage_id, title="B").json()["id"]
+    c = create_task(client, project_id, stage_id, title="C").json()["id"]
+
+    assert client.post(f"/api/projects/{project_id}/tasks/{a}/dependencies", json={"dependency_id": b}, headers=OWNER).status_code == 201
+    assert client.post(f"/api/projects/{project_id}/tasks/{b}/dependencies", json={"dependency_id": c}, headers=OWNER).status_code == 201
+    # C depends on A -> indirect cycle.
+    resp = client.post(f"/api/projects/{project_id}/tasks/{c}/dependencies", json={"dependency_id": a}, headers=OWNER)
+    assert resp.status_code == 422
+    assert "检测到循环依赖：A → B → C → A" in resp.json()["detail"]
+
+
+def test_remove_dependency_record(client):
+    project_id = create_project(client, stages=[{"name": "开发"}])
+    stage_id = list_stages(client, project_id)[0]["id"]
+    a = create_task(client, project_id, stage_id, title="A").json()["id"]
+    b = create_task(client, project_id, stage_id, title="B").json()["id"]
+
+    dep = client.post(f"/api/projects/{project_id}/tasks/{a}/dependencies", json={"dependency_id": b}, headers=OWNER).json()
+    resp = client.delete(f"/api/projects/{project_id}/tasks/{a}/dependencies/{dep['id']}", headers=OWNER)
+    assert resp.status_code == 200
+    assert client.get(f"/api/projects/{project_id}/tasks/{a}/dependencies", headers=OWNER).json() == []
+
+
+def test_delete_dependent_task_rejected(client):
+    project_id = create_project(client, stages=[{"name": "开发"}])
+    stage_id = list_stages(client, project_id)[0]["id"]
+    a = create_task(client, project_id, stage_id, title="A").json()["id"]
+    b = create_task(client, project_id, stage_id, title="B").json()["id"]
+
+    client.post(f"/api/projects/{project_id}/tasks/{a}/dependencies", json={"dependency_id": b}, headers=OWNER)
+    # Deleting B (which A depends on) must be blocked.
+    resp = client.delete(f"/api/projects/{project_id}/tasks/{b}", headers=OWNER)
+    assert resp.status_code == 409
+    assert "被" in resp.json()["detail"]
+
+
+def test_mark_task_blocked_success_and_requires_reason_handler(client):
+    project_id = create_project(client, stages=[{"name": "开发"}])
+    stage_id = list_stages(client, project_id)[0]["id"]
+    t = create_task(client, project_id, stage_id, title="受阻任务", assignee="task-owner").json()["id"]
+
+    # Missing handler -> 422.
+    resp = client.post(f"/api/projects/{project_id}/tasks/{t}/blockers", json={"reason": "卡住了"}, headers=OWNER)
+    assert resp.status_code == 422
+    # Missing reason -> pydantic 422.
+    resp = client.post(f"/api/projects/{project_id}/tasks/{t}/blockers", json={"handler_id": "task-owner"}, headers=OWNER)
+    assert resp.status_code == 422
+
+    resp = client.post(f"/api/projects/{project_id}/tasks/{t}/blockers", json={"reason": "卡住了", "handler_id": "task-owner"}, headers=OWNER)
+    assert resp.status_code == 201
+    assert resp.json()["task_id"] == t
+    assert resp.json()["resolved_at"] is None
+
+    task = client.get(f"/api/projects/{project_id}/stages/{stage_id}/tasks", headers=OWNER).json()
+    assert next(x for x in task if x["id"] == t)["status"] == "blocked"
+
+    blockers = client.get(f"/api/projects/{project_id}/tasks/{t}/blockers", headers=OWNER).json()
+    assert len(blockers) == 1
+    assert blockers[0]["reason"] == "卡住了"
+
+
+def test_resolve_task_blocker_to_pending_verification(client):
+    project_id = create_project(client, stages=[{"name": "开发"}])
+    stage_id = list_stages(client, project_id)[0]["id"]
+    t = create_task(client, project_id, stage_id, title="受阻任务", assignee="task-owner").json()["id"]
+
+    blocker = client.post(
+        f"/api/projects/{project_id}/tasks/{t}/blockers", json={"reason": "卡住了", "handler_id": "task-owner"}, headers=OWNER
+    ).json()
+
+    # Missing resolution -> 422.
+    assert client.patch(f"/api/projects/{project_id}/tasks/{t}/blockers/{blocker['id']}", json={}, headers=OWNER).status_code == 422
+
+    resp = client.patch(
+        f"/api/projects/{project_id}/tasks/{t}/blockers/{blocker['id']}", json={"resolution": "已修复"}, headers=OWNER
+    )
+    assert resp.status_code == 200
+    assert resp.json()["resolved_at"] is not None
+    assert resp.json()["resolution"] == "已修复"
+
+    task = client.get(f"/api/projects/{project_id}/stages/{stage_id}/tasks", headers=OWNER).json()
+    assert next(x for x in task if x["id"] == t)["status"] == "pending_verification"
+
+
+def test_mark_stage_blocked_owner_and_non_owner(client):
+    project_id = create_project(client, stages=[{"name": "开发"}])
+    _seed_roles(client, project_id)
+    stage_id = list_stages(client, project_id)[0]["id"]
+
+    # Non-owner (member) -> 403.
+    resp = client.post(
+        f"/api/projects/{project_id}/stages/{stage_id}/blockers", json={"reason": "阻塞", "handler_id": "task-owner"}, headers=MEMBER
+    )
+    assert resp.status_code == 403
+
+    # Project owner -> success.
+    resp = client.post(
+        f"/api/projects/{project_id}/stages/{stage_id}/blockers", json={"reason": "阻塞", "handler_id": "task-owner"}, headers=OWNER
+    )
+    assert resp.status_code == 201
+    assert _get_stage(client, project_id, stage_id)["status"] == "blocked"
+
+    # Stage tasks stay untouched.
+    blockers = client.get(f"/api/projects/{project_id}/stages/{stage_id}/blockers", headers=OWNER).json()
+    assert len(blockers) == 1
+    assert blockers[0]["previous_stage_status"] == "planned"
+
+
+def test_resolve_stage_blocker_restores_status(client):
+    project_id = create_project(client, stages=[{"name": "开发"}])
+    stage_id = list_stages(client, project_id)[0]["id"]
+    client.post(f"/api/projects/{project_id}/stages/{stage_id}/start", json={}, headers=OWNER)
+    assert _get_stage(client, project_id, stage_id)["status"] == "active"
+
+    blocker = client.post(
+        f"/api/projects/{project_id}/stages/{stage_id}/blockers", json={"reason": "阻塞", "handler_id": "task-owner"}, headers=OWNER
+    ).json()
+    assert _get_stage(client, project_id, stage_id)["status"] == "blocked"
+
+    resp = client.patch(
+        f"/api/projects/{project_id}/stages/{stage_id}/blockers/{blocker['id']}", json={"resolution": "已解决"}, headers=OWNER
+    )
+    assert resp.status_code == 200
+    assert _get_stage(client, project_id, stage_id)["status"] == "active"
+
+
+def test_confirm_blocker_continue_and_reblock(client):
+    project_id = create_project(client, stages=[{"name": "开发"}])
+    stage_id = list_stages(client, project_id)[0]["id"]
+
+    # continue
+    t1 = create_task(client, project_id, stage_id, title="任务1", assignee="task-owner").json()["id"]
+    b1 = client.post(f"/api/projects/{project_id}/tasks/{t1}/blockers", json={"reason": "x", "handler_id": "task-owner"}, headers=OWNER).json()
+    client.patch(f"/api/projects/{project_id}/tasks/{t1}/blockers/{b1['id']}", json={"resolution": "ok"}, headers=OWNER)
+    resp = client.post(f"/api/projects/{project_id}/tasks/{t1}/confirm-blocker", json={"action": "continue"}, headers=OWNER)
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "in_progress"
+
+    # reblock
+    t2 = create_task(client, project_id, stage_id, title="任务2", assignee="task-owner").json()["id"]
+    b2 = client.post(f"/api/projects/{project_id}/tasks/{t2}/blockers", json={"reason": "x", "handler_id": "task-owner"}, headers=OWNER).json()
+    client.patch(f"/api/projects/{project_id}/tasks/{t2}/blockers/{b2['id']}", json={"resolution": "ok"}, headers=OWNER)
+    resp = client.post(
+        f"/api/projects/{project_id}/tasks/{t2}/confirm-blocker",
+        json={"action": "reblock", "reason": "仍未解决", "handler_id": "task-owner"},
+        headers=OWNER,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["task_id"] == t2
+    assert resp.json()["resolved_at"] is None
+    task = client.get(f"/api/projects/{project_id}/stages/{stage_id}/tasks", headers=OWNER).json()
+    assert next(x for x in task if x["id"] == t2)["status"] == "blocked"
+    blockers = client.get(f"/api/projects/{project_id}/tasks/{t2}/blockers", headers=OWNER).json()
+    assert len(blockers) == 2
+
+
+def test_confirm_blocker_requires_assignee(client):
+    project_id = create_project(client, stages=[{"name": "开发"}])
+    _seed_roles(client, project_id)
+    stage_id = list_stages(client, project_id)[0]["id"]
+
+    t = create_task(client, project_id, stage_id, title="任务", assignee="task-member").json()["id"]
+    b = client.post(f"/api/projects/{project_id}/tasks/{t}/blockers", json={"reason": "x", "handler_id": "task-owner"}, headers=OWNER).json()
+    client.patch(f"/api/projects/{project_id}/tasks/{t}/blockers/{b['id']}", json={"resolution": "ok"}, headers=OWNER)
+
+    # Owner (non-assignee) tries to confirm -> 403.
+    resp = client.post(f"/api/projects/{project_id}/tasks/{t}/confirm-blocker", json={"action": "continue"}, headers=OWNER)
+    assert resp.status_code == 403
+    assert "非任务负责人无法确认阻塞" in resp.json()["detail"]
