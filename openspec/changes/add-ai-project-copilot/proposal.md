@@ -23,13 +23,6 @@
 ## Impact
 
 - **后端**：新增 AI 项目摘要、阶段风险分析、个人行动建议、项目管理问答、近期变化回顾 API
-- **API**：新增 `/api/projects/{id}/copilot/summary` 端点；新增 `/api/projects/{id}/stages/{sid}/copilot/analysis` 端点；新增 `/my-tasks/copilot/advice` 端点；新增 `/api/projects/{id}/copilot/chat` 端点；新增 `/api/projects/{id}/copilot/changes` 端点
-- **前端**：新增 AI 副驾驶 UI
-- **依赖**：需要接入 AI 模型 API（如豆包）
-
-## Impact
-
-- **后端**：新增 AI 项目摘要、阶段风险分析、个人行动建议、项目管理问答、近期变化回顾 API
-- **API**：新增 `/api/projects/{id}/copilot/summary` 端点；新增 `/api/projects/{id}/stages/{sid}/copilot/analysis` 端点；新增 `/my-tasks/copilot/advice` 端点；新增 `/api/projects/{id}/copilot/chat` 端点；新增 `/api/projects/{id}/copilot/changes` 端点
+- **API**：新增 `/api/projects/{id}/copilot/summary` 端点；新增 `/api/projects/{id}/stages/{sid}/copilot/analysis` 端点；新增 `/api/my-tasks/copilot/advice` 端点；新增 `/api/projects/{id}/copilot/chat` 端点；新增 `/api/projects/{id}/copilot/changes` 端点
 - **前端**：新增 AI 副驾驶 UI
 - **依赖**：需要接入 AI 模型 API（如豆包）
