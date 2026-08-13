@@ -133,6 +133,12 @@ def _apply_legacy_column_patches(session: Session) -> None:
     task_columns = {row[1] for row in session.execute(text("PRAGMA table_info(tasks)"))}
     if "completed_at" not in task_columns:
         session.execute(text("ALTER TABLE tasks ADD COLUMN completed_at TEXT"))
+    # PRD-03: link tasks to stages and track a planned date.
+    if "stage_id" not in task_columns:
+        session.execute(text("ALTER TABLE tasks ADD COLUMN stage_id INTEGER REFERENCES stages(id) ON DELETE SET NULL"))
+        session.execute(text("CREATE INDEX IF NOT EXISTS idx_tasks_stage ON tasks(stage_id, status)"))
+    if "planned_date" not in task_columns:
+        session.execute(text("ALTER TABLE tasks ADD COLUMN planned_date TEXT"))
     project_columns = {row[1] for row in session.execute(text("PRAGMA table_info(projects)"))}
     if "default_sprint_weeks" not in project_columns:
         session.execute(text("ALTER TABLE projects ADD COLUMN default_sprint_weeks INTEGER NOT NULL DEFAULT 2"))

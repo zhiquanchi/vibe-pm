@@ -90,17 +90,22 @@ class Task(Base):
     __table_args__ = (
         Index("idx_tasks_sprint", "sprint_id", "status"),
         Index("idx_tasks_project", "project_id"),
+        Index("idx_tasks_stage", "stage_id", "status"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     project_id: Mapped[int] = mapped_column(Integer, nullable=False)
     sprint_id: Mapped[int | None] = mapped_column(Integer)
+    # PRD-03: tasks can also belong to a stage (coexists with sprint_id during transition).
+    stage_id: Mapped[int | None] = mapped_column(ForeignKey("stages.id", ondelete="SET NULL"), nullable=True)
     title: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String, nullable=False, default="todo")
     story_points: Mapped[float] = mapped_column(Float, nullable=False, default=1)
     priority: Mapped[str] = mapped_column(String, nullable=False, default="P2")
     assignee: Mapped[str | None] = mapped_column(String)
+    # PRD-03: planned date for the task (计划日期).
+    planned_date: Mapped[str | None] = mapped_column(String)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
