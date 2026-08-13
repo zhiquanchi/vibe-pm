@@ -8,7 +8,19 @@ from app.db.database import get_db
 from app.domains.tasks import create_task, delete_task, list_tasks, update_task
 from app.routers.projects import require_project_member
 from app.schemas.stages import TaskListFilters
-from app.schemas.task import TaskCreate, TaskCreateRequest, TaskMoveRequest, TaskUpdate, TaskUpdateRequest
+from app.schemas.task import (
+    ConfirmBlockerRequest,
+    StageBlockerCreate,
+    StageBlockerResolve,
+    TaskBlockerCreate,
+    TaskBlockerResolve,
+    TaskCreate,
+    TaskCreateRequest,
+    TaskDependencyCreate,
+    TaskMoveRequest,
+    TaskUpdate,
+    TaskUpdateRequest,
+)
 from app.services import tasks as task_service
 from loguru import logger
 
@@ -97,3 +109,66 @@ def my_tasks(
 ):
     logger.info(f"[endpoint GET /api/my-tasks] user_id={user_id} project_id={project_id} status={status} priority={priority}")
     return task_service.list_my_tasks(session, user_id, project_id=project_id, stage_id=stage_id, status=status, priority=priority, sort=sort)
+
+
+# --- PRD-04: task dependencies & blockers ---
+
+
+@router.post("/projects/{project_id}/tasks/{task_id}/dependencies", status_code=201)
+def add_task_dependency_endpoint(project_id: int, task_id: int, payload: TaskDependencyCreate, user_id: str = Depends(require_project_member), session: Session = Depends(get_db)):
+    logger.info(f"[endpoint POST /api/projects/{project_id}/tasks/{task_id}/dependencies] user_id={user_id} dependency_id={payload.dependency_id}")
+    return task_service.add_task_dependency(session, project_id, task_id, payload.dependency_id, user_id)
+
+
+@router.get("/projects/{project_id}/tasks/{task_id}/dependencies")
+def list_task_dependencies_endpoint(project_id: int, task_id: int, _user_id: str = Depends(require_project_member), session: Session = Depends(get_db)):
+    logger.info(f"[endpoint GET /api/projects/{project_id}/tasks/{task_id}/dependencies] user_id={_user_id}")
+    return task_service.list_task_dependencies(session, project_id, task_id)
+
+
+@router.delete("/projects/{project_id}/tasks/{task_id}/dependencies/{dep_id}")
+def remove_task_dependency_endpoint(project_id: int, task_id: int, dep_id: int, user_id: str = Depends(require_project_member), session: Session = Depends(get_db)):
+    logger.info(f"[endpoint DELETE /api/projects/{project_id}/tasks/{task_id}/dependencies/{dep_id}] user_id={user_id}")
+    return task_service.remove_task_dependency(session, project_id, task_id, dep_id, user_id)
+
+
+@router.post("/projects/{project_id}/tasks/{task_id}/blockers", status_code=201)
+def mark_task_blocked_endpoint(project_id: int, task_id: int, payload: TaskBlockerCreate, user_id: str = Depends(require_project_member), session: Session = Depends(get_db)):
+    logger.info(f"[endpoint POST /api/projects/{project_id}/tasks/{task_id}/blockers] user_id={user_id} handler_id={payload.handler_id}")
+    return task_service.mark_task_blocked(session, project_id, task_id, payload, user_id)
+
+
+@router.get("/projects/{project_id}/tasks/{task_id}/blockers")
+def list_task_blockers_endpoint(project_id: int, task_id: int, _user_id: str = Depends(require_project_member), session: Session = Depends(get_db)):
+    logger.info(f"[endpoint GET /api/projects/{project_id}/tasks/{task_id}/blockers] user_id={_user_id}")
+    return task_service.list_task_blockers(session, project_id, task_id)
+
+
+@router.patch("/projects/{project_id}/tasks/{task_id}/blockers/{bid}")
+def resolve_task_blocker_endpoint(project_id: int, task_id: int, bid: int, payload: TaskBlockerResolve, user_id: str = Depends(require_project_member), session: Session = Depends(get_db)):
+    logger.info(f"[endpoint PATCH /api/projects/{project_id}/tasks/{task_id}/blockers/{bid}] user_id={user_id}")
+    return task_service.resolve_task_blocker(session, project_id, task_id, bid, payload, user_id)
+
+
+@router.post("/projects/{project_id}/stages/{stage_id}/blockers", status_code=201)
+def mark_stage_blocked_endpoint(project_id: int, stage_id: int, payload: StageBlockerCreate, user_id: str = Depends(require_project_member), session: Session = Depends(get_db)):
+    logger.info(f"[endpoint POST /api/projects/{project_id}/stages/{stage_id}/blockers] user_id={user_id} handler_id={payload.handler_id}")
+    return task_service.mark_stage_blocked(session, project_id, stage_id, payload, user_id)
+
+
+@router.get("/projects/{project_id}/stages/{stage_id}/blockers")
+def list_stage_blockers_endpoint(project_id: int, stage_id: int, _user_id: str = Depends(require_project_member), session: Session = Depends(get_db)):
+    logger.info(f"[endpoint GET /api/projects/{project_id}/stages/{stage_id}/blockers] user_id={_user_id}")
+    return task_service.list_stage_blockers(session, project_id, stage_id)
+
+
+@router.patch("/projects/{project_id}/stages/{stage_id}/blockers/{bid}")
+def resolve_stage_blocker_endpoint(project_id: int, stage_id: int, bid: int, payload: StageBlockerResolve, user_id: str = Depends(require_project_member), session: Session = Depends(get_db)):
+    logger.info(f"[endpoint PATCH /api/projects/{project_id}/stages/{stage_id}/blockers/{bid}] user_id={user_id}")
+    return task_service.resolve_stage_blocker(session, project_id, stage_id, bid, payload, user_id)
+
+
+@router.post("/projects/{project_id}/tasks/{task_id}/confirm-blocker")
+def confirm_task_blocker_endpoint(project_id: int, task_id: int, payload: ConfirmBlockerRequest, user_id: str = Depends(require_project_member), session: Session = Depends(get_db)):
+    logger.info(f"[endpoint POST /api/projects/{project_id}/tasks/{task_id}/confirm-blocker] user_id={user_id} action={payload.action}")
+    return task_service.confirm_task_blocker(session, project_id, task_id, payload.action, payload, user_id)
