@@ -155,3 +155,41 @@ def update_stage_task(session: Session, project_id: int, task_id: int, payload, 
         _activity(session, project_id, "task_updated", f"更新任务「{task.title}」", user_id)
     session.commit()
     return to_dict(session.get(Task, task.id))
+
+
+def _stage_label(stage: Stage | None) -> str:
+    return stage.name if stage is not None else "未规划"
+
+
+def move_task(session: Session, project_id: int, task_id: int, payload, user_id: str) -> dict:
+    _require_writer(session, project_id, user_id)
+    task = _task_or_404(session, task_id)
+    if task.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.status == "done":
+        raise HTTPException(status_code=409, detail="已完成任务不可移动")
+
+    source_stage = _stage_or_404(session, project_id, task.stage_id)
+    target_stage = _stage_or_404(session, project_id, payload.target_stage_id)
+    # The source stage must be writable (completed stages are read-only).
+    _require_stage_writable(session, source_stage)
+    # The target stage must be unfinished.
+    if target_stage is not None and target_stage.status == "completed":
+        raise HTTPException(status_code=409, detail="目标阶段已完成，无法移入")
+    # Moving a task out of a started (active) stage requires a reason.
+    if source_stage is not None and source_stage.status == "active" and target_stage != source_stage:
+        if not payload.reason or not payload.reason.strip():
+            raise HTTPException(status_code=422, detail="移出已启动阶段需填写原因")
+
+    task.stage_id = payload.target_stage_id
+    task.updated_at = _now()
+    if target_stage != source_stage:
+        _activity(
+            session,
+            project_id,
+            "task_moved",
+            f"任务「{task.title}」移动：{_stage_label(source_stage)} → {_stage_label(target_stage)}",
+            user_id,
+        )
+    session.commit()
+    return to_dict(session.get(Task, task.id))
