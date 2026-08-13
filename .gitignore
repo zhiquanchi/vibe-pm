@@ -1,0 +1,5 @@
+# Runtime logs
+backend/logs/
+frontend/logs/
+*.log
+*.out
