@@ -193,3 +193,29 @@ def move_task(session: Session, project_id: int, task_id: int, payload, user_id:
         )
     session.commit()
     return to_dict(session.get(Task, task.id))
+
+
+def _guard_delete(session: Session, project_id: int, task: Task) -> None:
+    """Block deletion of tasks that are depended on or required for acceptance.
+
+    The ``task_dependencies`` (PRD-04) and ``stage_deliverables`` with
+    ``is_required`` (PRD-05) tables that back these checks do not exist yet, so
+    the guard is a documented forward-integration point. It will be filled in by
+    those changes once the schemas are added.
+    """
+
+
+def delete_task(session: Session, project_id: int, task_id: int, user_id: str) -> dict:
+    _require_writer(session, project_id, user_id)
+    task = _task_or_404(session, task_id)
+    if task.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Task not found")
+    stage = _stage_or_404(session, project_id, task.stage_id)
+    _require_stage_writable(session, stage)
+    _guard_delete(session, project_id, task)
+
+    title = task.title
+    session.delete(task)
+    _activity(session, project_id, "task_deleted", f"删除任务「{title}」", user_id)
+    session.commit()
+    return {"deleted": True}
