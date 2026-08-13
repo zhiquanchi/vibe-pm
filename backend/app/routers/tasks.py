@@ -7,7 +7,7 @@ from app.db.database import get_db
 from app.domains.tasks import create_task, delete_task, list_tasks, update_task
 from app.routers.projects import require_project_member
 from app.schemas.stages import TaskListFilters
-from app.schemas.task import TaskCreate, TaskCreateRequest, TaskUpdateRequest
+from app.schemas.task import TaskCreate, TaskCreateRequest, TaskMoveRequest, TaskUpdate, TaskUpdateRequest
 from app.services import tasks as task_service
 
 
@@ -57,3 +57,18 @@ def list_stage_tasks(
 ):
     filters = TaskListFilters(status=status, priority=priority, assignee=assignee, search=search, sort=sort)
     return task_service.list_stage_tasks(session, project_id, stage_id, filters)
+
+
+@router.patch("/projects/{project_id}/tasks/{task_id}")
+def update_stage_task(project_id: int, task_id: int, payload: TaskUpdate, user_id: str = Depends(require_project_member), session: Session = Depends(get_db)):
+    return task_service.update_stage_task(session, project_id, task_id, payload, user_id)
+
+
+@router.put("/projects/{project_id}/tasks/{task_id}/move")
+def move_stage_task(project_id: int, task_id: int, payload: TaskMoveRequest, user_id: str = Depends(require_project_member), session: Session = Depends(get_db)):
+    return task_service.move_task(session, project_id, task_id, payload, user_id)
+
+
+@router.delete("/projects/{project_id}/tasks/{task_id}")
+def delete_stage_task(project_id: int, task_id: int, user_id: str = Depends(require_project_member), session: Session = Depends(get_db)):
+    return task_service.delete_task(session, project_id, task_id, user_id)
