@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from loguru import logger
 
-from app.db.models import Project, ProjectActivity, ProjectMember, Stage, Task
+from app.db.models import Project, ProjectActivity, ProjectMember, Stage, StageBlocker, Task, TaskBlocker, TaskDependency
 from app.services.common import to_dict
 
 
@@ -230,11 +230,19 @@ def move_task(session: Session, project_id: int, task_id: int, payload, user_id:
 def _guard_delete(session: Session, project_id: int, task: Task) -> None:
     """Block deletion of tasks that are depended on or required for acceptance.
 
-    The ``task_dependencies`` (PRD-04) and ``stage_deliverables`` with
-    ``is_required`` (PRD-05) tables that back these checks do not exist yet, so
-    the guard is a documented forward-integration point. It will be filled in by
-    those changes once the schemas are added.
+    PRD-04: a task that is referenced as a dependency (``dependency_id``) of
+    another task may not be deleted until those dependencies are removed.
+    PRD-05: ``stage_deliverables`` with ``is_required`` will add a second guard
+    here once that schema lands — left as a forward-integration point for now.
     """
+    dependency_count = session.scalar(
+        select(func.count()).select_from(TaskDependency).where(TaskDependency.dependency_id == task.id)
+    )
+    if dependency_count and dependency_count > 0:
+        raise HTTPException(
+            status_code=409,
+            detail=f"该任务被 {dependency_count} 个任务依赖，请先解除依赖关系",
+        )
 
 
 def delete_task(session: Session, project_id: int, task_id: int, user_id: str) -> dict:
@@ -338,3 +346,323 @@ def list_my_tasks(
     else:  # planned_date
         result.sort(key=lambda d: d.get("planned_date") or "9999-12-31", reverse=desc)
     return result
+
+
+# --- PRD-04: task dependencies & blockers ---
+
+
+def _require_stage_owner_or_project_owner(session: Session, project_id: int, stage: Stage, user_id: str) -> None:
+    """Blockers may be raised by the stage owner or a project owner."""
+    if stage.owner_id == user_id:
+        return
+    member = session.get(ProjectMember, (project_id, user_id))
+    if member is not None and member.role == "owner":
+        return
+    raise HTTPException(status_code=403, detail="仅阶段负责人或项目负责人可标记阶段阻塞")
+
+
+def _dependency_cycle_path(session: Session, task_id: int, dependency_id: int) -> list[int] | None:
+    """DFS from ``dependency_id`` along dependency edges, looking for ``task_id``.
+
+    Returns the cycle's task-id path (start … end == task_id) if adding the new
+    edge ``task_id -> dependency_id`` would introduce a cycle, else ``None``.
+    """
+    stack: list[tuple[int, list[int]]] = [(dependency_id, [dependency_id])]
+    visited: set[int] = set()
+    while stack:
+        node, path = stack.pop()
+        if node == task_id:
+            return path
+        if node in visited:
+            continue
+        visited.add(node)
+        deps = session.scalars(select(TaskDependency.dependency_id).where(TaskDependency.task_id == node)).all()
+        for dep in deps:
+            if dep not in visited:
+                stack.append((dep, path + [dep]))
+    return None
+
+
+def add_task_dependency(session: Session, project_id: int, task_id: int, dependency_id: int, user_id: str) -> dict:
+    _require_writer(session, project_id, user_id)
+    task = _task_or_404(session, task_id)
+    if task.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Task not found")
+    dependency = _task_or_404(session, dependency_id)
+    if dependency.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Dependency task not found")
+
+    if task_id == dependency_id:
+        raise HTTPException(status_code=422, detail="任务不能依赖自身")
+
+    # Reject duplicate dependencies.
+    existing = session.scalar(
+        select(TaskDependency.id).where(TaskDependency.task_id == task_id, TaskDependency.dependency_id == dependency_id)
+    )
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="该前置依赖已存在")
+
+    # DFS cycle detection along dependency edges.
+    cycle = _dependency_cycle_path(session, task_id, dependency_id)
+    if cycle is not None:
+        titles = [session.get(Task, tid).title for tid in cycle]
+        titles.append(session.get(Task, dependency_id).title)
+        raise HTTPException(status_code=422, detail=f"检测到循环依赖：{' → '.join(titles)}")
+
+    now = _now()
+    link = TaskDependency(task_id=task_id, dependency_id=dependency_id, created_at=now)
+    session.add(link)
+    session.flush()
+    _activity(session, project_id, "task_dependency_added", f"为任务「{task.title}」添加前置依赖「{dependency.title}」", user_id)
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception(f"用户 {user_id} 为任务「{task.title}」(task_id={task_id}) 添加前置依赖「{dependency.title}」失败")
+        raise
+    logger.info(f"用户 {user_id} 为任务「{task.title}」(task_id={task_id}) 添加前置依赖「{dependency.title}」(dependency_id={dependency_id}) 成功")
+    return to_dict(session.get(TaskDependency, link.id))
+
+
+def list_task_dependencies(session: Session, project_id: int, task_id: int) -> list[dict]:
+    task = _task_or_404(session, task_id)
+    if task.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Task not found")
+    stmt = (
+        select(TaskDependency, Task)
+        .join(Task, Task.id == TaskDependency.dependency_id)
+        .where(TaskDependency.task_id == task_id)
+        .order_by(TaskDependency.id)
+    )
+    rows = session.execute(stmt).all()
+    result: list[dict] = []
+    for link, dep in rows:
+        result.append({"id": link.id, "dependency": to_dict(dep)})
+    return result
+
+
+def remove_task_dependency(session: Session, project_id: int, task_id: int, dep_id: int, user_id: str) -> dict:
+    _require_writer(session, project_id, user_id)
+    task = _task_or_404(session, task_id)
+    if task.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Task not found")
+    link = session.get(TaskDependency, dep_id)
+    if link is None or link.task_id != task_id:
+        raise HTTPException(status_code=404, detail="Dependency not found")
+    dep = session.get(Task, link.dependency_id)
+    session.delete(link)
+    _activity(session, project_id, "task_dependency_removed", f"移除任务「{task.title}」的前置依赖「{dep.title if dep else link.dependency_id}」", user_id)
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception(f"用户 {user_id} 移除任务「{task.title}」(task_id={task_id}) 的依赖 {dep_id} 失败")
+        raise
+    logger.info(f"用户 {user_id} 移除任务「{task.title}」(task_id={task_id}) 的依赖 {dep_id} 成功")
+    return {"deleted": True}
+
+
+def mark_task_blocked(session: Session, project_id: int, task_id: int, payload, user_id: str) -> dict:
+    _require_writer(session, project_id, user_id)
+    task = _task_or_404(session, task_id)
+    if task.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if not payload.reason or not payload.reason.strip() or payload.handler_id is None:
+        raise HTTPException(status_code=422, detail="标记阻塞时必须填写原因和处理人")
+    if task.status == "done":
+        raise HTTPException(status_code=422, detail="已完成任务不能标记为阻塞")
+
+    now = _now()
+    blocker = TaskBlocker(
+        task_id=task_id,
+        reason=payload.reason.strip(),
+        handler_id=payload.handler_id,
+        created_by=user_id,
+        created_at=now,
+        resolved_at=None,
+    )
+    session.add(blocker)
+    session.flush()
+    # Dedicated flow bypasses TASK_TRANSITIONS.
+    task.status = "blocked"
+    task.updated_at = now
+    _activity(session, project_id, "task_blocker_created", f"任务「{task.title}」被标记为阻塞：{payload.reason.strip()}", user_id)
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception(f"用户 {user_id} 标记任务「{task.title}」(task_id={task_id}) 为阻塞失败")
+        raise
+    logger.info(f"用户 {user_id} 标记任务「{task.title}」(task_id={task_id}) 为阻塞成功")
+    return to_dict(session.get(TaskBlocker, blocker.id))
+
+
+def list_task_blockers(session: Session, project_id: int, task_id: int) -> list[dict]:
+    task = _task_or_404(session, task_id)
+    if task.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Task not found")
+    blockers = session.scalars(
+        select(TaskBlocker).where(TaskBlocker.task_id == task_id).order_by(TaskBlocker.id)
+    ).all()
+    return [to_dict(b) for b in blockers]
+
+
+def resolve_task_blocker(session: Session, project_id: int, task_id: int, blocker_id: int, payload, user_id: str) -> dict:
+    _require_writer(session, project_id, user_id)
+    task = _task_or_404(session, task_id)
+    if task.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if not payload.resolution or not payload.resolution.strip():
+        raise HTTPException(status_code=422, detail="解除阻塞时必须填写解决结果")
+    blocker = session.get(TaskBlocker, blocker_id)
+    if blocker is None or blocker.task_id != task_id:
+        raise HTTPException(status_code=404, detail="Blocker not found")
+
+    now = _now()
+    blocker.resolved_at = now
+    blocker.resolution = payload.resolution.strip()
+    # Unblocked task awaits confirmation by its assignee.
+    task.status = "pending_verification"
+    task.updated_at = now
+    _activity(session, project_id, "task_blocker_resolved", f"任务「{task.title}」阻塞已解除：{payload.resolution.strip()}", user_id)
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception(f"用户 {user_id} 解除任务「{task.title}」(task_id={task_id}) 阻塞 {blocker_id} 失败")
+        raise
+    logger.info(f"用户 {user_id} 解除任务「{task.title}」(task_id={task_id}) 阻塞 {blocker_id} 成功")
+    return to_dict(session.get(TaskBlocker, blocker.id))
+
+
+def mark_stage_blocked(session: Session, project_id: int, stage_id: int, payload, user_id: str) -> dict:
+    _require_writer(session, project_id, user_id)
+    stage = _stage_or_404(session, project_id, stage_id)
+    _require_stage_owner_or_project_owner(session, project_id, stage, user_id)
+    if not payload.reason or not payload.reason.strip() or payload.handler_id is None:
+        raise HTTPException(status_code=422, detail="标记阻塞时必须填写原因和处理人")
+
+    now = _now()
+    blocker = StageBlocker(
+        stage_id=stage_id,
+        reason=payload.reason.strip(),
+        handler_id=payload.handler_id,
+        created_by=user_id,
+        created_at=now,
+        resolved_at=None,
+        previous_stage_status=stage.status,
+    )
+    session.add(blocker)
+    session.flush()
+    previous = stage.status
+    stage.status = "blocked"
+    _activity(
+        session,
+        project_id,
+        "stage_blocker_created",
+        f"阶段「{stage.name}」被标记为阻塞（原状态：{STATUS_LABELS.get(previous, previous)}）：{payload.reason.strip()}",
+        user_id,
+    )
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception(f"用户 {user_id} 标记阶段「{stage.name}」(stage_id={stage_id}) 为阻塞失败")
+        raise
+    logger.info(f"用户 {user_id} 标记阶段「{stage.name}」(stage_id={stage_id}) 为阻塞成功")
+    return to_dict(session.get(StageBlocker, blocker.id))
+
+
+def list_stage_blockers(session: Session, project_id: int, stage_id: int) -> list[dict]:
+    stage = _stage_or_404(session, project_id, stage_id)
+    blockers = session.scalars(
+        select(StageBlocker).where(StageBlocker.stage_id == stage_id).order_by(StageBlocker.id)
+    ).all()
+    return [to_dict(b) for b in blockers]
+
+
+def resolve_stage_blocker(session: Session, project_id: int, stage_id: int, blocker_id: int, payload, user_id: str) -> dict:
+    _require_writer(session, project_id, user_id)
+    stage = _stage_or_404(session, project_id, stage_id)
+    _require_stage_owner_or_project_owner(session, project_id, stage, user_id)
+    if not payload.resolution or not payload.resolution.strip():
+        raise HTTPException(status_code=422, detail="解除阻塞时必须填写解决结果")
+    blocker = session.get(StageBlocker, blocker_id)
+    if blocker is None or blocker.stage_id != stage_id:
+        raise HTTPException(status_code=404, detail="Blocker not found")
+
+    now = _now()
+    blocker.resolved_at = now
+    blocker.resolution = payload.resolution.strip()
+    # Restore the stage to its pre-block status (typically 'active').
+    previous = blocker.previous_stage_status or "active"
+    stage.status = previous
+    _activity(
+        session,
+        project_id,
+        "stage_blocker_resolved",
+        f"阶段「{stage.name}」阻塞已解除，恢复为{STATUS_LABELS.get(previous, previous)}：{payload.resolution.strip()}",
+        user_id,
+    )
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception(f"用户 {user_id} 解除阶段「{stage.name}」(stage_id={stage_id}) 阻塞 {blocker_id} 失败")
+        raise
+    logger.info(f"用户 {user_id} 解除阶段「{stage.name}」(stage_id={stage_id}) 阻塞 {blocker_id} 成功")
+    return to_dict(session.get(StageBlocker, blocker.id))
+
+
+def confirm_task_blocker(session: Session, project_id: int, task_id: int, action: str, payload, user_id: str) -> dict:
+    _require_writer(session, project_id, user_id)
+    task = _task_or_404(session, task_id)
+    if task.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.status != "pending_verification":
+        raise HTTPException(status_code=422, detail="仅待确认状态的任务可确认阻塞结果")
+
+    # Only the task assignee may confirm.
+    if task.assignee != user_id:
+        raise HTTPException(status_code=403, detail="非任务负责人无法确认阻塞")
+
+    now = _now()
+    if action == "continue":
+        task.status = "in_progress"
+        task.updated_at = now
+        _activity(session, project_id, "task_confirmed", f"任务「{task.title}」阻塞已确认，继续执行", user_id)
+        try:
+            session.commit()
+        except Exception:
+            session.rollback()
+            logger.exception(f"用户 {user_id} 确认任务「{task.title}」(task_id={task_id}) 继续失败")
+            raise
+        logger.info(f"用户 {user_id} 确认任务「{task.title}」(task_id={task_id}) 继续成功")
+        return to_dict(session.get(Task, task.id))
+
+    if action == "reblock":
+        if not payload or not payload.reason or not payload.reason.strip() or payload.handler_id is None:
+            raise HTTPException(status_code=422, detail="标记阻塞时必须填写原因和处理人")
+        blocker = TaskBlocker(
+            task_id=task_id,
+            reason=payload.reason.strip(),
+            handler_id=payload.handler_id,
+            created_by=user_id,
+            created_at=now,
+            resolved_at=None,
+        )
+        session.add(blocker)
+        session.flush()
+        task.status = "blocked"
+        task.updated_at = now
+        _activity(session, project_id, "task_blocker_created", f"任务「{task.title}」被重新标记为阻塞：{payload.reason.strip()}", user_id)
+        try:
+            session.commit()
+        except Exception:
+            session.rollback()
+            logger.exception(f"用户 {user_id} 重新标记任务「{task.title}」(task_id={task_id}) 为阻塞失败")
+            raise
+        logger.info(f"用户 {user_id} 重新标记任务「{task.title}」(task_id={task_id}) 为阻塞成功")
+        return to_dict(session.get(TaskBlocker, blocker.id))
+
+    raise HTTPException(status_code=422, detail="无效的确认动作")
