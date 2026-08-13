@@ -4,6 +4,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import cors_origins
+from app.core.logging_config import setup_logging
+
+# Configure loguru (single writer to /var/log/vibe-pm/source/backend.log as flat
+# JSON, plus a stderr sink). Uvicorn's stdlib logs are bridged into loguru via
+# `logging_config.json` (--log-config), so framework logs also flow through
+# loguru and the file is written exactly once.
+setup_logging()
 from app.db.database import init_db
 from app.routers.api import router
 from app.routers.projects import router as projects_router

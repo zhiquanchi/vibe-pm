@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import HTTPException
+from loguru import logger
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -75,6 +76,10 @@ def create_task(session: Session, data: dict[str, Any]) -> dict[str, Any]:
     position = data["position"] if data["position"] is not None else _next_position(session, sprint_id)
     now = _now()
     completed_at = now if data["status"] == "done" else None
+    logger.info(
+        "用户 {} 创建任务: project={} sprint={} title={} status={}",
+        data.get("created_by"), data["project_id"], sprint_id, data["title"], data["status"],
+    )
     task = Task(
         project_id=data["project_id"],
         sprint_id=sprint_id,
@@ -94,7 +99,13 @@ def create_task(session: Session, data: dict[str, Any]) -> dict[str, Any]:
     if _active_sprint(session, sprint_id):
         _scope_change(session, sprint_id=sprint_id, task_id=task.id, change_type="add_task", description=f"Added {data['title']}", points_delta=data["story_points"], reason=data["reason"], created_by=data["created_by"])
         snapshot(session, sprint_id)
-    session.commit()
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception("任务创建失败: sprint={} title={}", sprint_id, data["title"])
+        raise
+    logger.info("任务已创建: task={} sprint={} title={}", task.id, sprint_id, data["title"])
     return to_dict(session.get(Task, task.id))
 
 
@@ -102,6 +113,7 @@ def update_task(session: Session, task_id: int, data: dict[str, Any]) -> dict[st
     task = session.get(Task, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
+    logger.info("用户 {} 更新任务: task={} 字段={}", data.get("created_by"), task_id, sorted(data.keys()))
     reason = data.pop("reason", None)
     created_by = data.pop("created_by", "current-user")
     # ``sprint_id=None`` explicitly moves a task back to the backlog; preserve it.
@@ -133,7 +145,16 @@ def update_task(session: Session, task_id: int, data: dict[str, Any]) -> dict[st
     elif old_active and "story_points" in data and new_points != old_points:
         _scope_change(session, sprint_id=old_sprint, task_id=task_id, change_type="change_points", description=f"Changed points for {old_title}", points_delta=new_points - old_points, reason=reason, created_by=created_by)
         snapshot(session, old_sprint)
-    session.commit()
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception("任务更新失败: task={}", task_id)
+        raise
+    logger.info(
+        "任务已更新: task={} title={} 状态={} 点数变更={}",
+        task_id, old_title, data.get("status"), (new_points - old_points) if "story_points" in data else 0,
+    )
     return to_dict(session.get(Task, task_id))
 
 
@@ -141,9 +162,16 @@ def delete_task(session: Session, task_id: int, reason: str | None = None, creat
     task = session.get(Task, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
+    logger.info("用户 {} 删除任务: task={} title={} reason={}", created_by, task_id, task.title, reason)
     _require_writable_sprint(session, task.sprint_id)
     if _active_sprint(session, task.sprint_id):
         _scope_change(session, sprint_id=task.sprint_id, task_id=task_id, change_type="remove_task", description=f"Deleted {task.title}", points_delta=-float(task.story_points), reason=reason, created_by=created_by)
         snapshot(session, task.sprint_id)
     session.delete(task)
-    session.commit()
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception("任务删除失败: task={}", task_id)
+        raise
+    logger.info("任务已删除: task={} title={}", task_id, task.title)

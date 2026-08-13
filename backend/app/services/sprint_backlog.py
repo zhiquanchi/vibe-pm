@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import HTTPException
+from loguru import logger
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -40,8 +41,15 @@ def create_sprint(session: Session, payload) -> dict:
         created_at=now,
     )
     session.add(sprint)
-    session.commit()
-    return to_dict(_sprint(session, sprint.id))
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception("Sprint 创建失败: project={} name={}", payload.project_id, payload.name)
+        raise
+    created = _sprint(session, sprint.id)
+    logger.info("Sprint 已创建: sprint={} name={} project={}", created.id, created.name, payload.project_id)
+    return to_dict(created)
 
 
 def list_sprints(session: Session, project_id: int | None = None) -> list[dict]:
@@ -77,6 +85,7 @@ def update_status(session: Session, sprint_id: int, target: str) -> dict:
     if target not in ALLOWED_TRANSITIONS.get(current, set()):
         raise HTTPException(status_code=409, detail=f"Invalid sprint transition: {current} -> {target}")
     if target == current:
+        logger.info("Sprint 状态无变化(目标与当前相同): sprint={} status={}", sprint_id, current)
         return {"sprint": to_dict(sprint), "stats": _stats(session, sprint_id) if target == "completed" else None}
 
     if target == "active":
@@ -89,7 +98,14 @@ def update_status(session: Session, sprint_id: int, target: str) -> dict:
         sprint.status = "active"
         sprint.initial_points = points
         snapshot(session, sprint_id)
-        session.commit()
+        logger.info("Sprint 启动(active): sprint={} initial_points={}", sprint_id, points)
+        try:
+            session.commit()
+        except Exception:
+            session.rollback()
+            logger.exception("Sprint 启动失败: sprint={}", sprint_id)
+            raise
+        logger.info("Sprint 已启动: sprint={} name={}", sprint_id, sprint.name)
         return {"sprint": to_dict(_sprint(session, sprint_id)), "stats": None}
 
     # Completing a sprint is one transaction: calculate first, then return unfinished work to backlog.
@@ -99,7 +115,14 @@ def update_status(session: Session, sprint_id: int, target: str) -> dict:
         task.sprint_id = None
         task.updated_at = now
     sprint.status = "completed"
-    session.commit()
+    logger.info("Sprint 完成(completed), 未完成任务退回 backlog: sprint={} 退回任务数={}", sprint_id, stats["task_count"] - stats["completed_task_count"])
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception("Sprint 完成失败: sprint={}", sprint_id)
+        raise
+    logger.info("Sprint 已完成: sprint={} name={}", sprint_id, sprint.name)
     return {"sprint": to_dict(_sprint(session, sprint_id)), "stats": stats}
 
 
@@ -134,6 +157,10 @@ def move_task(session: Session, sprint_id: int, task_id: int, into: bool, reason
         task.updated_at = now
         delta, kind = -task.story_points, "remove_task"
         description = f"Removed task: {task.title}"
+    logger.info(
+        "任务在 Sprint 间移动: sprint={} task={} action={} title={} reason={}",
+        sprint_id, task_id, "移入" if into else "移出", task.title, reason,
+    )
     if sprint.status == "active":
         session.add(
             ScopeChange(
@@ -148,5 +175,13 @@ def move_task(session: Session, sprint_id: int, task_id: int, into: bool, reason
             )
         )
         snapshot(session, sprint_id)
-    session.commit()
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception("任务移动失败: sprint={} task={} action={}", sprint_id, task_id, "移入" if into else "移出")
+        raise
+    logger.info(
+        "任务移动已提交: sprint={} task={} action={}", sprint_id, task_id, "移入" if into else "移出",
+    )
     return to_dict(session.get(Task, task_id))

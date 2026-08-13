@@ -6,6 +6,8 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from loguru import logger
+
 from app.db.models import Project, ProjectActivity, ProjectMember, Stage, Task
 from app.services.common import to_dict
 
@@ -109,7 +111,13 @@ def create_stage_task(session: Session, project_id: int, stage_id: int | None, p
     session.add(task)
     session.flush()
     _activity(session, project_id, "task_created", f"创建任务「{task.title}」", user_id)
-    session.commit()
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception(f"用户 {user_id} 在阶段 {_stage_label(stage)} 创建任务「{task.title}」失败")
+        raise
+    logger.info(f"用户 {user_id} 在阶段 {_stage_label(stage)} 创建任务「{task.title}」(task_id={task.id}) 成功")
     return to_dict(session.get(Task, task.id))
 
 
@@ -153,7 +161,19 @@ def update_stage_task(session: Session, project_id: int, task_id: int, payload, 
         )
     if changed_fields:
         _activity(session, project_id, "task_updated", f"更新任务「{task.title}」", user_id)
-    session.commit()
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception(f"用户 {user_id} 更新任务「{task.title}」(task_id={task.id}) 失败")
+        raise
+    if new_status is not None and new_status != old_status:
+        logger.info(
+            f"用户 {user_id} 将任务「{task.title}」(task_id={task.id}) 状态 "
+            f"{STATUS_LABELS.get(old_status, old_status)} → {STATUS_LABELS.get(new_status, new_status)} 成功"
+        )
+    if changed_fields:
+        logger.info(f"用户 {user_id} 更新任务「{task.title}」(task_id={task.id}) 字段 {', '.join(changed_fields)} 成功")
     return to_dict(session.get(Task, task.id))
 
 
@@ -191,7 +211,19 @@ def move_task(session: Session, project_id: int, task_id: int, payload, user_id:
             f"任务「{task.title}」移动：{_stage_label(source_stage)} → {_stage_label(target_stage)}",
             user_id,
         )
-    session.commit()
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception(
+            f"用户 {user_id} 移动任务「{task.title}」(task_id={task.id}) "
+            f"从 {_stage_label(source_stage)} 到 {_stage_label(target_stage)} 失败"
+        )
+        raise
+    logger.info(
+        f"用户 {user_id} 移动任务「{task.title}」(task_id={task.id})："
+        f"{_stage_label(source_stage)} → {_stage_label(target_stage)} 成功"
+    )
     return to_dict(session.get(Task, task.id))
 
 
@@ -215,9 +247,16 @@ def delete_task(session: Session, project_id: int, task_id: int, user_id: str) -
     _guard_delete(session, project_id, task)
 
     title = task.title
+    task_id = task.id
     session.delete(task)
     _activity(session, project_id, "task_deleted", f"删除任务「{title}」", user_id)
-    session.commit()
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception(f"用户 {user_id} 删除任务「{title}」(task_id={task_id}) 失败")
+        raise
+    logger.info(f"用户 {user_id} 删除任务「{title}」(task_id={task_id}) 成功")
     return {"deleted": True}
 
 

@@ -11,22 +11,26 @@ from app.db.database import get_db, snapshot
 from app.db.models import ScopeChange, Sprint, SprintSnapshot, Task
 from app.schemas import ScopeChangeCreate, SprintCreate, TaskCreate, TaskUpdate
 from app.services.common import to_dict
+from loguru import logger
 
 router = APIRouter(prefix="/api")
 
 
 @router.get("/health")
 def health():
+    logger.info("[endpoint GET /api/health] health check")
     return {"status": "ok"}
 
 
 @router.get("/sprints")
 def sprints(session: Session = Depends(get_db)):
+    logger.info("[endpoint GET /api/sprints] listing sprints")
     return [to_dict(sprint) for sprint in session.scalars(select(Sprint).order_by(Sprint.start_date.desc()))]
 
 
 @router.post("/sprints")
 def create_sprint(payload: SprintCreate, session: Session = Depends(get_db)):
+    logger.info(f"[endpoint POST /api/sprints] name={payload.name!r}")
     now = datetime.utcnow().isoformat()
     sprint = Sprint(
         project_id=1,
@@ -43,8 +47,10 @@ def create_sprint(payload: SprintCreate, session: Session = Depends(get_db)):
 
 @router.get("/sprints/{sprint_id}")
 def sprint(sprint_id: int, session: Session = Depends(get_db)):
+    logger.info(f"[endpoint GET /api/sprints/{sprint_id}] fetching sprint")
     sprint_row = session.get(Sprint, sprint_id)
     if sprint_row is None:
+        logger.warning(f"[endpoint GET /api/sprints/{sprint_id}] 404 sprint not found")
         raise HTTPException(404, "Sprint not found")
     tasks = session.scalars(select(Task).where(Task.sprint_id == sprint_id).order_by(Task.position, Task.id))
     changes = session.scalars(select(ScopeChange).where(ScopeChange.sprint_id == sprint_id).order_by(ScopeChange.created_at.desc()))
@@ -53,6 +59,7 @@ def sprint(sprint_id: int, session: Session = Depends(get_db)):
 
 @router.get("/tasks")
 def tasks(sprint_id: int | None = None, session: Session = Depends(get_db)):
+    logger.info(f"[endpoint GET /api/tasks] sprint_id={sprint_id}")
     stmt = select(Task).order_by(Task.position, Task.id)
     if sprint_id is not None:
         stmt = stmt.where(Task.sprint_id == sprint_id)
@@ -61,6 +68,7 @@ def tasks(sprint_id: int | None = None, session: Session = Depends(get_db)):
 
 @router.post("/tasks")
 def create_task(payload: TaskCreate, session: Session = Depends(get_db)):
+    logger.info(f"[endpoint POST /api/tasks] project_id={payload.project_id} sprint_id={payload.sprint_id} title={payload.title!r}")
     now = datetime.utcnow().isoformat()
     task = Task(
         project_id=payload.project_id,
@@ -84,8 +92,10 @@ def create_task(payload: TaskCreate, session: Session = Depends(get_db)):
 
 @router.patch("/tasks/{task_id}")
 def update_task(task_id: int, payload: TaskUpdate, user_id: str = Depends(current_user_id), session: Session = Depends(get_db)):
+    logger.info(f"[endpoint PATCH /api/tasks/{task_id}] user_id={user_id}")
     task = session.get(Task, task_id)
     if task is None:
+        logger.warning(f"[endpoint PATCH /api/tasks/{task_id}] 404 task not found")
         raise HTTPException(404, "Task not found")
     old_title = task.title
     old_points = task.story_points
@@ -115,8 +125,10 @@ def update_task(task_id: int, payload: TaskUpdate, user_id: str = Depends(curren
 
 @router.delete("/tasks/{task_id}")
 def delete_task(task_id: int, session: Session = Depends(get_db)):
+    logger.info(f"[endpoint DELETE /api/tasks/{task_id}]")
     task = session.get(Task, task_id)
     if task is None:
+        logger.warning(f"[endpoint DELETE /api/tasks/{task_id}] 404 task not found")
         raise HTTPException(404, "Task not found")
     session.delete(task)
     session.commit()
@@ -125,13 +137,16 @@ def delete_task(task_id: int, session: Session = Depends(get_db)):
 
 @router.get("/sprints/{sprint_id}/scope-changes")
 def scope_changes(sprint_id: int, session: Session = Depends(get_db)):
+    logger.info(f"[endpoint GET /api/sprints/{sprint_id}/scope-changes] listing")
     rows = session.scalars(select(ScopeChange).where(ScopeChange.sprint_id == sprint_id).order_by(ScopeChange.created_at.desc()))
     return [to_dict(row) for row in rows]
 
 
 @router.post("/sprints/{sprint_id}/scope-changes")
 def create_scope_change(sprint_id: int, payload: ScopeChangeCreate, user_id: str = Depends(current_user_id), session: Session = Depends(get_db)):
+    logger.info(f"[endpoint POST /api/sprints/{sprint_id}/scope-changes] user_id={user_id} type={payload.type!r}")
     if session.get(Sprint, sprint_id) is None:
+        logger.warning(f"[endpoint POST /api/sprints/{sprint_id}/scope-changes] 404 sprint not found")
         raise HTTPException(404, "Sprint not found")
     now = datetime.utcnow().isoformat()
     change = ScopeChange(
@@ -153,5 +168,6 @@ def create_scope_change(sprint_id: int, payload: ScopeChangeCreate, user_id: str
 
 @router.get("/sprints/{sprint_id}/snapshots")
 def snapshots(sprint_id: int, session: Session = Depends(get_db)):
+    logger.info(f"[endpoint GET /api/sprints/{sprint_id}/snapshots] listing")
     rows = session.scalars(select(SprintSnapshot).where(SprintSnapshot.sprint_id == sprint_id).order_by(SprintSnapshot.snapshot_date))
     return [to_dict(row) for row in rows]

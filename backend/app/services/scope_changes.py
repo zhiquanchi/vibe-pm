@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from fastapi import HTTPException
+from loguru import logger
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -34,6 +35,10 @@ def _capacity_warning(session: Session, sprint_id: int) -> str | None:
 def apply_scope_change(session: Session, sprint_id: int, command) -> dict:
     """Apply one scope command atomically, including its log and today's snapshot."""
     sprint = _sprint(session, sprint_id)
+    logger.info(
+        "用户 {} 发起范围变更: sprint={} type={} task={}",
+        command.created_by, sprint_id, command.type, command.task_id,
+    )
     try:
         with session.begin_nested():
             now = _now()
@@ -102,9 +107,18 @@ def apply_scope_change(session: Session, sprint_id: int, command) -> dict:
                 "capacity_warning": _capacity_warning(session, sprint_id),
             }
         session.commit()
+        logger.info(
+            "范围变更已提交: change_id={} sprint={} type={} task={} delta={}pt 容量预警={}",
+            change.id, sprint_id, command.type, task_id, delta,
+            result.get("capacity_warning"),
+        )
         return result
     except Exception:
         session.rollback()
+        logger.exception(
+            "范围变更失败已回滚: sprint={} type={} task={}",
+            sprint_id, command.type, command.task_id,
+        )
         raise
 
 
@@ -112,8 +126,15 @@ def generate_snapshot(session: Session, sprint_id: int, snapshot_date: date | No
     _sprint(session, sprint_id)
     # Upsert is intentionally idempotent for the requested date.
     day = snapshot_date or date.today()
-    snapshot(session, sprint_id, day)
-    session.commit()
+    logger.info("生成范围快照: sprint={} date={}", sprint_id, day.isoformat())
+    try:
+        snapshot(session, sprint_id, day)
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception("生成范围快照失败: sprint={} date={}", sprint_id, day.isoformat())
+        raise
+    logger.info("范围快照已生成: sprint={} date={}", sprint_id, day.isoformat())
     return to_dict(
         session.scalars(select(SprintSnapshot).where(SprintSnapshot.sprint_id == sprint_id, SprintSnapshot.snapshot_date == day.isoformat())).first()
     )

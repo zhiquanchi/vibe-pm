@@ -10,6 +10,7 @@ from app.routers.projects import require_project_member
 from app.schemas.stages import TaskListFilters
 from app.schemas.task import TaskCreate, TaskCreateRequest, TaskMoveRequest, TaskUpdate, TaskUpdateRequest
 from app.services import tasks as task_service
+from loguru import logger
 
 
 router = APIRouter(prefix="/api", tags=["tasks"])
@@ -17,21 +18,25 @@ router = APIRouter(prefix="/api", tags=["tasks"])
 
 @router.get("/tasks")
 def get_tasks(sprint_id: int | None = Query(default=None), session: Session = Depends(get_db)):
+    logger.info(f"[endpoint GET /api/tasks] sprint_id={sprint_id}")
     return list_tasks(session, sprint_id)
 
 
 @router.post("/tasks", status_code=201)
 def post_task(payload: TaskCreateRequest, session: Session = Depends(get_db)):
+    logger.info(f"[endpoint POST /api/tasks] project_id={payload.project_id} sprint_id={payload.sprint_id} title={payload.title!r}")
     return create_task(session, payload.model_dump())
 
 
 @router.patch("/tasks/{task_id}")
 def patch_task(task_id: int, payload: TaskUpdateRequest, session: Session = Depends(get_db)):
+    logger.info(f"[endpoint PATCH /api/tasks/{task_id}] fields={list(payload.model_dump(exclude_unset=True).keys())}")
     return update_task(session, task_id, payload.model_dump(exclude_unset=True))
 
 
 @router.delete("/tasks/{task_id}")
 def remove_task(task_id: int, reason: str | None = Query(default=None), created_by: str = Query(default="current-user"), session: Session = Depends(get_db)):
+    logger.info(f"[endpoint DELETE /api/tasks/{task_id}] created_by={created_by} (reason omitted)")
     delete_task(session, task_id, reason, created_by)
     return {"deleted": True}
 
@@ -41,6 +46,7 @@ def remove_task(task_id: int, reason: str | None = Query(default=None), created_
 
 @router.post("/projects/{project_id}/stages/{stage_id}/tasks", status_code=201)
 def create_stage_task(project_id: int, stage_id: int, payload: TaskCreate, user_id: str = Depends(require_project_member), session: Session = Depends(get_db)):
+    logger.info(f"[endpoint POST /api/projects/{project_id}/stages/{stage_id}/tasks] user_id={user_id} title={payload.title!r}")
     return task_service.create_stage_task(session, project_id, stage_id, payload, user_id)
 
 
@@ -56,22 +62,26 @@ def list_stage_tasks(
     _user_id: str = Depends(require_project_member),
     session: Session = Depends(get_db),
 ):
+    logger.info(f"[endpoint GET /api/projects/{project_id}/stages/{stage_id}/tasks] status={status} priority={priority} assignee={assignee} sort={sort} (search omitted)")
     filters = TaskListFilters(status=status, priority=priority, assignee=assignee, search=search, sort=sort)
     return task_service.list_stage_tasks(session, project_id, stage_id, filters)
 
 
 @router.patch("/projects/{project_id}/tasks/{task_id}")
 def update_stage_task(project_id: int, task_id: int, payload: TaskUpdate, user_id: str = Depends(require_project_member), session: Session = Depends(get_db)):
+    logger.info(f"[endpoint PATCH /api/projects/{project_id}/tasks/{task_id}] user_id={user_id}")
     return task_service.update_stage_task(session, project_id, task_id, payload, user_id)
 
 
 @router.put("/projects/{project_id}/tasks/{task_id}/move")
 def move_stage_task(project_id: int, task_id: int, payload: TaskMoveRequest, user_id: str = Depends(require_project_member), session: Session = Depends(get_db)):
+    logger.info(f"[endpoint PUT /api/projects/{project_id}/tasks/{task_id}/move] user_id={user_id} target_stage={payload.target_stage_id}")
     return task_service.move_task(session, project_id, task_id, payload, user_id)
 
 
 @router.delete("/projects/{project_id}/tasks/{task_id}")
 def delete_stage_task(project_id: int, task_id: int, user_id: str = Depends(require_project_member), session: Session = Depends(get_db)):
+    logger.info(f"[endpoint DELETE /api/projects/{project_id}/tasks/{task_id}] user_id={user_id}")
     return task_service.delete_task(session, project_id, task_id, user_id)
 
 
@@ -85,4 +95,5 @@ def my_tasks(
     user_id: str = Depends(current_user_id),
     session: Session = Depends(get_db),
 ):
+    logger.info(f"[endpoint GET /api/my-tasks] user_id={user_id} project_id={project_id} status={status} priority={priority}")
     return task_service.list_my_tasks(session, user_id, project_id=project_id, stage_id=stage_id, status=status, priority=priority, sort=sort)

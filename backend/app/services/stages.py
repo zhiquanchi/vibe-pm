@@ -6,6 +6,8 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from loguru import logger
+
 from app.db.models import Project, ProjectActivity, ProjectMember, Stage
 from app.schemas.stages import StageTemplateItem
 from app.services.common import to_dict
@@ -70,6 +72,7 @@ def create_stages_for_project(session: Session, project: Project, items: list[St
             )
         )
     _activity(session, project.id, "project_created", f"创建项目「{project.name}」（{len(specs)} 个阶段）", created_by)
+    logger.info(f"操作者 {created_by} 创建项目「{project.name}」并初始化 {len(specs)} 个阶段")
 
 
 def list_stages(session: Session, project_id: int) -> list[dict]:
@@ -97,7 +100,13 @@ def add_stage(session: Session, project_id: int, payload, user_id: str) -> dict:
     )
     session.add(stage)
     _activity(session, project_id, "stage_created", f"新增阶段「{name}」", user_id)
-    session.commit()
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception(f"操作者 {user_id} 在项目 {project_id} 新增阶段「{name}」失败")
+        raise
+    logger.info(f"操作者 {user_id} 在项目 {project_id} 新增阶段「{name}」(stage_id={stage.id}) 成功")
     return to_dict(stage)
 
 
@@ -124,7 +133,16 @@ def update_stage(session: Session, project_id: int, stage_id: int, payload, user
         raise HTTPException(status_code=422, detail="planned_end must be on or after planned_start")
     if old_name is not None:
         _activity(session, project_id, "stage_renamed", f"阶段「{old_name}」重命名为「{stage.name}」", user_id)
-    session.commit()
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception(f"操作者 {user_id} 更新阶段(stage_id={stage_id})失败")
+        raise
+    if old_name is not None:
+        logger.info(f"操作者 {user_id} 将阶段「{old_name}」重命名为「{stage.name}」(stage_id={stage_id}) 成功")
+    else:
+        logger.info(f"操作者 {user_id} 更新阶段「{stage.name}」(stage_id={stage_id}) 成功")
     return to_dict(stage)
 
 
@@ -146,7 +164,13 @@ def reorder_stages(session: Session, project_id: int, stage_ids: list[int], user
     for slot, stage_id in zip(slots, stage_ids):
         by_id[stage_id].position = slot
     _activity(session, project_id, "stage_reordered", "调整阶段顺序", user_id)
-    session.commit()
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception(f"操作者 {user_id} 调整项目 {project_id} 阶段顺序失败")
+        raise
+    logger.info(f"操作者 {user_id} 调整项目 {project_id} 阶段顺序成功（共 {len(stage_ids)} 个阶段）")
     return list_stages(session, project_id)
 
 
@@ -174,7 +198,14 @@ def delete_stage(session: Session, project_id: int, stage_id: int, confirm: bool
             successor.is_primary = True
             _activity(session, project_id, "primary_changed", f"主阶段切换为「{successor.name}」", user_id)
     _activity(session, project_id, "stage_deleted", f"删除阶段「{name}」", user_id)
-    session.commit()
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception(f"操作者 {user_id} 删除阶段「{name}」(stage_id={stage_id}) 失败")
+        raise
+    primary_msg = f"，主阶段切换为「{successor.name}」" if was_primary and successor is not None else ""
+    logger.info(f"操作者 {user_id} 删除阶段「{name}」(stage_id={stage_id}) 成功{primary_msg}")
     return {"deleted": True}
 
 
@@ -195,7 +226,14 @@ def start_stage(session: Session, project_id: int, stage_id: int, primary: bool,
         stage.is_primary = True
         _activity(session, project_id, "primary_changed", f"主阶段切换为「{stage.name}」", user_id)
     _activity(session, project_id, "stage_started", f"启动阶段「{stage.name}」", user_id)
-    session.commit()
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception(f"操作者 {user_id} 启动阶段「{stage.name}」(stage_id={stage_id}) 失败")
+        raise
+    primary_msg = "，并设为主阶段" if stage.is_primary else ""
+    logger.info(f"操作者 {user_id} 启动阶段「{stage.name}」(stage_id={stage_id}) 成功{primary_msg}")
     return to_dict(stage)
 
 
@@ -211,7 +249,13 @@ def set_primary(session: Session, project_id: int, stage_id: int, user_id: str) 
         current_primary.is_primary = False
     stage.is_primary = True
     _activity(session, project_id, "primary_changed", f"主阶段切换为「{stage.name}」", user_id)
-    session.commit()
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception(f"操作者 {user_id} 将项目 {project_id} 主阶段切换为「{stage.name}」(stage_id={stage_id}) 失败")
+        raise
+    logger.info(f"操作者 {user_id} 将项目 {project_id} 主阶段切换为「{stage.name}」(stage_id={stage_id}) 成功")
     return to_dict(stage)
 
 
@@ -234,7 +278,14 @@ def complete_stage(session: Session, project_id: int, stage_id: int, successor_s
         successor.is_primary = True
         _activity(session, project_id, "primary_changed", f"主阶段切换为「{successor.name}」", user_id)
     _activity(session, project_id, "stage_completed", f"完成阶段「{stage.name}」", user_id)
-    session.commit()
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception(f"操作者 {user_id} 完成阶段「{stage.name}」(stage_id={stage_id}) 失败")
+        raise
+    successor_msg = f"，主阶段切换为「{successor.name}」" if successor is not None else ""
+    logger.info(f"操作者 {user_id} 完成阶段「{stage.name}」(stage_id={stage_id}) 成功{successor_msg}")
     return to_dict(stage)
 
 
@@ -260,5 +311,17 @@ def update_stage_owner(session: Session, project_id: int, stage_id: int, new_own
         old_owner = session.get(Profile, old_owner_id)
         _activity(session, project_id, "stage_owner_changed", f"阶段「{stage.name}」负责人从「{old_owner.name}」更换为「{new_owner.name}」", updated_by)
 
-    session.commit()
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception(f"操作者 {updated_by} 变更阶段「{stage.name}」(stage_id={stage_id}) 负责人失败")
+        raise
+    if old_owner_id is None:
+        logger.info(f"操作者 {updated_by} 指定「{new_owner.name}」为阶段「{stage.name}」(stage_id={stage_id}) 负责人成功")
+    else:
+        logger.info(
+            f"操作者 {updated_by} 将阶段「{stage.name}」(stage_id={stage_id}) 负责人 "
+            f"从「{old_owner.name}」更换为「{new_owner.name}」成功"
+        )
     return to_dict(stage)

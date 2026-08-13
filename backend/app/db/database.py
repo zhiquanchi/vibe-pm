@@ -6,6 +6,7 @@ from pathlib import Path
 from sqlalchemy import Engine, create_engine, event, func, select, text
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, sessionmaker
+from loguru import logger
 
 from app.core.config import database_path
 from app.db.models import Base, Profile, Project, ProjectMember, ScopeChange, Sprint, SprintSnapshot, Task
@@ -130,62 +131,123 @@ def _seed_demo(session: Session) -> None:
 
 def _apply_legacy_column_patches(session: Session) -> None:
     """Keep existing SQLite databases compatible with columns added later."""
+
+    def _apply_migration(name: str, ddl_hint: str, op) -> None:
+        """Run a single risky schema migration with full logging.
+
+        Logs a warning before running, info on success, and exception on failure
+        so that otherwise-silent ALTER failures are never lost.
+        """
+        logger.warning(f"[schema-migration] about to run: {name} | {ddl_hint}")
+        try:
+            op()
+            logger.info(f"[schema-migration] succeeded: {name}")
+        except Exception:
+            logger.exception(f"[schema-migration] FAILED: {name} | {ddl_hint}")
+            raise
+
+    logger.info("Applying legacy schema column patches to existing SQLite database")
+
     task_columns = {row[1] for row in session.execute(text("PRAGMA table_info(tasks)"))}
     if "completed_at" not in task_columns:
-        session.execute(text("ALTER TABLE tasks ADD COLUMN completed_at TEXT"))
+        _apply_migration(
+            "add tasks.completed_at",
+            "ALTER TABLE tasks ADD COLUMN completed_at TEXT",
+            lambda: session.execute(text("ALTER TABLE tasks ADD COLUMN completed_at TEXT")),
+        )
     # PRD-03: link tasks to stages and track a planned date.
     if "stage_id" not in task_columns:
-        session.execute(text("ALTER TABLE tasks ADD COLUMN stage_id INTEGER REFERENCES stages(id) ON DELETE SET NULL"))
-        session.execute(text("CREATE INDEX IF NOT EXISTS idx_tasks_stage ON tasks(stage_id, status)"))
+        _apply_migration(
+            "add tasks.stage_id + index",
+            "ALTER TABLE tasks ADD COLUMN stage_id INTEGER REFERENCES stages(id); CREATE INDEX idx_tasks_stage",
+            lambda: [
+                session.execute(text("ALTER TABLE tasks ADD COLUMN stage_id INTEGER REFERENCES stages(id) ON DELETE SET NULL")),
+                session.execute(text("CREATE INDEX IF NOT EXISTS idx_tasks_stage ON tasks(stage_id, status)")),
+            ],
+        )
     if "planned_date" not in task_columns:
-        session.execute(text("ALTER TABLE tasks ADD COLUMN planned_date TEXT"))
+        _apply_migration(
+            "add tasks.planned_date",
+            "ALTER TABLE tasks ADD COLUMN planned_date TEXT",
+            lambda: session.execute(text("ALTER TABLE tasks ADD COLUMN planned_date TEXT")),
+        )
     project_columns = {row[1] for row in session.execute(text("PRAGMA table_info(projects)"))}
     if "default_sprint_weeks" not in project_columns:
-        session.execute(text("ALTER TABLE projects ADD COLUMN default_sprint_weeks INTEGER NOT NULL DEFAULT 2"))
+        _apply_migration(
+            "add projects.default_sprint_weeks",
+            "ALTER TABLE projects ADD COLUMN default_sprint_weeks INTEGER NOT NULL DEFAULT 2",
+            lambda: session.execute(text("ALTER TABLE projects ADD COLUMN default_sprint_weeks INTEGER NOT NULL DEFAULT 2")),
+        )
     snapshot_columns = {row[1] for row in session.execute(text("PRAGMA table_info(sprint_snapshots)"))}
     if "ideal_completed" not in snapshot_columns:
-        session.execute(text("ALTER TABLE sprint_snapshots ADD COLUMN ideal_completed REAL"))
+        _apply_migration(
+            "add sprint_snapshots.ideal_completed",
+            "ALTER TABLE sprint_snapshots ADD COLUMN ideal_completed REAL",
+            lambda: session.execute(text("ALTER TABLE sprint_snapshots ADD COLUMN ideal_completed REAL")),
+        )
     if "ideal_remaining" not in snapshot_columns:
-        session.execute(text("ALTER TABLE sprint_snapshots ADD COLUMN ideal_remaining REAL"))
+        _apply_migration(
+            "add sprint_snapshots.ideal_remaining",
+            "ALTER TABLE sprint_snapshots ADD COLUMN ideal_remaining REAL",
+            lambda: session.execute(text("ALTER TABLE sprint_snapshots ADD COLUMN ideal_remaining REAL")),
+        )
     if "scope_change_id" not in snapshot_columns:
-        session.execute(text("ALTER TABLE sprint_snapshots ADD COLUMN scope_change_id INTEGER"))
+        _apply_migration(
+            "add sprint_snapshots.scope_change_id",
+            "ALTER TABLE sprint_snapshots ADD COLUMN scope_change_id INTEGER",
+            lambda: session.execute(text("ALTER TABLE sprint_snapshots ADD COLUMN scope_change_id INTEGER")),
+        )
 
-    # Migrate project_members role constraint to support observer
-    # SQLite doesn't support ALTER TABLE ... DROP CONSTRAINT, so we check if observer is already supported
+    # Migrate project_members role constraint to support observer.
+    # SQLite doesn't support ALTER TABLE ... DROP CONSTRAINT, so we recreate the table.
     try:
-        # Test if observer role is accepted by trying to query with it
+        # Test if observer role is accepted by trying to query with it.
         session.execute(text("SELECT 1 FROM project_members WHERE role = 'observer' LIMIT 1"))
     except Exception:
-        # If observer role causes constraint violation, we need to recreate the table
-        # This is a complex migration, so we'll use a temporary table approach
-        session.execute(text("""
-            CREATE TABLE project_members_new (
-                project_id INTEGER NOT NULL,
-                user_id TEXT NOT NULL,
-                role TEXT NOT NULL DEFAULT 'member',
-                PRIMARY KEY (project_id, user_id),
-                FOREIGN KEY(project_id) REFERENCES projects (id) ON DELETE CASCADE,
-                FOREIGN KEY(user_id) REFERENCES profiles (id) ON DELETE CASCADE,
-                CHECK (role IN ('owner','member','observer'))
-            )
-        """))
-        session.execute(text("INSERT INTO project_members_new SELECT * FROM project_members"))
-        session.execute(text("DROP TABLE project_members"))
-        session.execute(text("ALTER TABLE project_members_new RENAME TO project_members"))
-        session.commit()
+        # If observer role causes a constraint violation, we rebuild the table
+        # with a CHECK that allows 'observer'. This is a complex migration.
+        logger.warning(
+            "[schema-migration] observer role not yet supported; rebuilding project_members table"
+        )
+        try:
+            session.execute(text("""
+                CREATE TABLE project_members_new (
+                    project_id INTEGER NOT NULL,
+                    user_id TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'member',
+                    PRIMARY KEY (project_id, user_id),
+                    FOREIGN KEY(project_id) REFERENCES projects (id) ON DELETE CASCADE,
+                    FOREIGN KEY(user_id) REFERENCES profiles (id) ON DELETE CASCADE,
+                    CHECK (role IN ('owner','member','observer'))
+                )
+            """))
+            session.execute(text("INSERT INTO project_members_new SELECT * FROM project_members"))
+            session.execute(text("DROP TABLE project_members"))
+            session.execute(text("ALTER TABLE project_members_new RENAME TO project_members"))
+            session.commit()
+            logger.info("[schema-migration] succeeded: project_members observer-role rebuild")
+        except Exception:
+            logger.exception("[schema-migration] FAILED: project_members observer-role rebuild")
+            raise
 
 
 def init_db(seed: bool = True) -> None:
     engine = get_engine()
+    logger.info(f"init_db starting: ensuring {len(Base.metadata.tables)} tables via create_all")
     Base.metadata.create_all(engine)
     with SessionLocal(bind=engine) as session:
         _apply_legacy_column_patches(session)
         if seed:
+            logger.info("init_db: seeding demo data")
             _seed_demo(session)
         # An active demo sprint should render immediately on a fresh install.
-        for sprint_id in session.scalars(select(Sprint.id).where(Sprint.status == "active")).all():
+        active_sprint_ids = session.scalars(select(Sprint.id).where(Sprint.status == "active")).all()
+        if active_sprint_ids:
+            logger.info(f"init_db: generating snapshots for {len(active_sprint_ids)} active sprint(s)")
+        for sprint_id in active_sprint_ids:
             snapshot(session, sprint_id)
         session.commit()
+    logger.info("init_db completed successfully")
 
 
 def snapshot(session: Session, sprint_id: int, snapshot_date: date | None = None, scope_change_id: int | None = None) -> None:
@@ -196,7 +258,9 @@ def snapshot(session: Session, sprint_id: int, snapshot_date: date | None = None
     """
     sprint = session.get(Sprint, sprint_id)
     if sprint is None:
+        logger.warning(f"snapshot: sprint {sprint_id} not found, cannot snapshot")
         raise ValueError(f"Sprint {sprint_id} not found")
+    logger.info(f"snapshot: upserting for sprint_id={sprint_id}, date={snapshot_date or date.today()}")
     total = float(session.scalar(select(func.coalesce(func.sum(Task.story_points), 0)).where(Task.sprint_id == sprint_id)))
     progress = {"done": 1.0, "in_review": 0.8, "in_progress": 0.5, "todo": 0.0}
     completed = sum(
@@ -231,3 +295,4 @@ def snapshot(session: Session, sprint_id: int, snapshot_date: date | None = None
         },
     )
     session.execute(stmt)
+    logger.info(f"snapshot: upserted snapshot for sprint_id={sprint_id}, date={day.isoformat()}")

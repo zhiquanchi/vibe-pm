@@ -6,6 +6,8 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from loguru import logger
+
 from app.db.models import Profile, ProjectActivity, ProjectMember, Stage, Task
 
 
@@ -46,7 +48,13 @@ def add_member(session: Session, project_id: int, user_id: str, name: str, email
     role_label = {"owner": "项目负责人", "member": "成员", "observer": "观察者"}[role]
     _activity(session, project_id, "member_added", f"添加{role_label}「{name}」", created_by)
 
-    session.commit()
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception(f"操作者 {created_by} 将用户 {user_id}（{name}）添加为项目 {project_id} 的{role_label}失败")
+        raise
+    logger.info(f"操作者 {created_by} 将用户 {user_id}（{name}）添加为项目 {project_id} 的{role_label}成功")
 
     # Return member info
     row = session.execute(
@@ -87,7 +95,19 @@ def update_member_role(session: Session, project_id: int, user_id: str, new_role
     profile = session.get(Profile, user_id)
     _activity(session, project_id, "member_role_changed", f"将「{profile.name}」角色调整为{role_label[new_role]}", updated_by)
 
-    session.commit()
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception(
+            f"操作者 {updated_by} 将用户 {user_id}（{profile.name}）在项目 {project_id} 的角色 "
+            f"从 {old_role} 调整为 {new_role} 失败"
+        )
+        raise
+    logger.info(
+        f"操作者 {updated_by} 将用户 {user_id}（{profile.name}）在项目 {project_id} 的角色 "
+        f"从 {old_role} 调整为 {new_role} 成功"
+    )
 
     # Return updated member info
     row = session.execute(
@@ -127,8 +147,15 @@ def remove_member(session: Session, project_id: int, user_id: str, removed_by: s
             raise HTTPException(status_code=409, detail="项目至少需要 2 名项目负责人以确保验收独立性")
 
     # Remove member
+    member_name = profile.name if profile is not None else user_id
     session.delete(member)
-    _activity(session, project_id, "member_removed", f"移除成员「{profile.name}」", removed_by)
-    session.commit()
+    _activity(session, project_id, "member_removed", f"移除成员「{member_name}」", removed_by)
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception(f"操作者 {removed_by} 将用户 {user_id}（{member_name}）从项目 {project_id} 移除失败")
+        raise
+    logger.info(f"操作者 {removed_by} 将用户 {user_id}（{member_name}）从项目 {project_id} 移除成功")
 
     return {"deleted": True}

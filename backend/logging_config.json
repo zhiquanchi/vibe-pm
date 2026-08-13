@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "disable_existing_loggers": false,
+  "formatters": {
+    "loguru": {
+      "()": "app.core.logging_config.LoguruHandler"
+    }
+  },
+  "handlers": {
+    "loguru": {
+      "()": "app.core.logging_config.LoguruHandler",
+      "level": "INFO"
+    }
+  },
+  "loggers": {
+    "uvicorn": {
+      "handlers": ["loguru"],
+      "level": "INFO",
+      "propagate": false
+    },
+    "uvicorn.error": {
+      "handlers": ["loguru"],
+      "level": "INFO",
+      "propagate": false
+    },
+    "uvicorn.access": {
+      "handlers": ["loguru"],
+      "level": "INFO",
+      "propagate": false
+    }
+  },
+  "root": {
+    "handlers": ["loguru"],
+    "level": "INFO"
+  }
+}
