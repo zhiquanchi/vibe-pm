@@ -11,8 +11,13 @@ import type {
   Stage,
   StageTemplateItem,
   StageUpdateInput,
+  StageTask,
+  MyTask,
   Task,
+  TaskCreate,
   TaskCreateInput,
+  TaskMoveRequest,
+  TaskUpdate,
   TaskUpdateInput,
   MemberCreateInput,
   MemberUpdateInput,
@@ -120,6 +125,41 @@ export class ApiClient {
   startStage(projectId: number, stageId: number, primary: boolean) { return this.post<Stage>(`/projects/${projectId}/stages/${stageId}/start`, { primary }); }
   setPrimaryStage(projectId: number, stageId: number) { return this.post<Stage>(`/projects/${projectId}/stages/${stageId}/primary`, {}); }
   completeStage(projectId: number, stageId: number, successorStageId?: number) { return this.post<Stage>(`/projects/${projectId}/stages/${stageId}/complete`, successorStageId ? { successor_stage_id: successorStageId } : {}); }
+
+  // --- PRD-03: stage-based task management ---
+
+  listStageTasks(projectId: number, stageId: number, params: { status?: string; priority?: string; assignee?: string; search?: string; sort?: string } = {}, signal?: AbortSignal) {
+    const query = new URLSearchParams();
+    if (params.status) query.set('status', params.status);
+    if (params.priority) query.set('priority', params.priority);
+    if (params.assignee) query.set('assignee', params.assignee);
+    if (params.search) query.set('search', params.search);
+    if (params.sort) query.set('sort', params.sort);
+    const qs = query.toString();
+    return this.get<StageTask[]>(`/projects/${projectId}/stages/${stageId}/tasks${qs ? `?${qs}` : ''}`, signal);
+  }
+  createStageTask(projectId: number, stageId: number, input: TaskCreate) {
+    return this.post<StageTask>(`/projects/${projectId}/stages/${stageId}/tasks`, input);
+  }
+  updateStageTask(projectId: number, taskId: number, input: TaskUpdate) {
+    return this.patch<StageTask>(`/projects/${projectId}/tasks/${taskId}`, input);
+  }
+  moveStageTask(projectId: number, taskId: number, input: TaskMoveRequest) {
+    return this.put<StageTask>(`/projects/${projectId}/tasks/${taskId}/move`, input);
+  }
+  deleteStageTask(projectId: number, taskId: number) {
+    return this.delete<{ deleted: boolean }>(`/projects/${projectId}/tasks/${taskId}`);
+  }
+  listMyTasks(params: { project_id?: number; stage_id?: number; status?: string; priority?: string; sort?: string } = {}, signal?: AbortSignal) {
+    const query = new URLSearchParams();
+    if (params.project_id != null) query.set('project_id', String(params.project_id));
+    if (params.stage_id != null) query.set('stage_id', String(params.stage_id));
+    if (params.status) query.set('status', params.status);
+    if (params.priority) query.set('priority', params.priority);
+    if (params.sort) query.set('sort', params.sort);
+    const qs = query.toString();
+    return this.get<MyTask[]>(`/my-tasks${qs ? `?${qs}` : ''}`, signal);
+  }
 }
 
 export const apiClient = new ApiClient();

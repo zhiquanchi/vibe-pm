@@ -199,6 +199,61 @@ export interface StageDeletePreview {
   confirm_required: boolean;
 }
 
+// --- PRD-03: stage-based task types ---
+
+export type StageTaskStatus = 'todo' | 'in_progress' | 'blocked' | 'pending_verification' | 'done';
+export type StageTaskPriority = 'urgent' | 'important' | 'normal' | 'low';
+
+export interface TaskCreate {
+  project_id: number;
+  stage_id?: number | null;
+  title: string;
+  description?: string | null;
+  status?: StageTaskStatus;
+  priority?: StageTaskPriority;
+  assignee?: string | null;
+  planned_date?: string | null;
+}
+
+export interface TaskUpdate {
+  title?: string;
+  description?: string | null;
+  status?: StageTaskStatus;
+  priority?: StageTaskPriority;
+  assignee?: string | null;
+  planned_date?: string | null;
+  position?: number;
+  reason?: string | null;
+}
+
+export interface TaskMoveRequest {
+  target_stage_id?: number | null;
+  reason?: string | null;
+}
+
+export interface StageTask {
+  id: number;
+  project_id: number;
+  stage_id: number | null;
+  title: string;
+  description: string | null;
+  status: StageTaskStatus;
+  priority: StageTaskPriority;
+  assignee: string | null;
+  planned_date: string | null;
+  position: number;
+  created_at?: string;
+  updated_at?: string;
+  completed_at?: string | null;
+}
+
+export interface MyTask extends StageTask {
+  project_name: string;
+  stage_name: string | null;
+  overdue: boolean;
+  blocked: boolean;
+}
+
 export interface ApiErrorShape {
   detail?: string | Array<{ msg?: string }> | StageDeletePreview;
   message?: string;

@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { Alert, Button as AntButton, ConfigProvider, Drawer as AntDrawer, Dropdown, Empty, Modal as AntModal, Statistic } from 'antd';
 import {
   Activity, Archive, ArrowDown, ArrowUp, BarChart3, Bell, CalendarDays, Check, ChevronDown, CircleHelp,
-  Flag, GitBranch, LayoutDashboard, LogOut, Milestone, MoreHorizontal, Pencil, Play, Plus, RefreshCw, Search, Settings2,
+  Flag, GitBranch, LayoutDashboard, ListTodo, LogOut, Milestone, MoreHorizontal, Pencil, Play, Plus, RefreshCw, ArrowRight, Search, Settings2,
   Shield, Trash2, Users, X, Zap,
 } from 'lucide-react';
 import Board from './components/Board';
@@ -12,7 +12,7 @@ import BurnupChart from './components/BurnupChart';
 import ScopeTimeline from './components/ScopeTimeline';
 import { apiClient, ApiError, getUserId } from './api';
 import { useSprintWorkspace } from './hooks';
-import type { ProjectMember, ScopeChange, Sprint, SprintStatus, Stage, StageDeletePreview, StageStatus, StageTemplateItem, Task, TaskCreateInput, TaskStatus } from './types';
+import type { MyTask, ProjectMember, ScopeChange, Sprint, SprintStatus, Stage, StageDeletePreview, StageStatus, StageTask, StageTaskPriority, StageTaskStatus, StageTemplateItem, Task, TaskCreateInput, TaskStatus } from './types';
 import './styles.css';
 import './backlog.css';
 import './app-shell.css';
@@ -24,8 +24,11 @@ const statusTone: Record<SprintStatus, string> = { planning: 'planning', active:
 const stageStatusLabel: Record<StageStatus, string> = { planned: '未开始', active: '进行中', completed: '已完成' };
 const stageStatusTone: Record<StageStatus, string> = { planned: 'planning', active: 'active', completed: 'completed' };
 const taskStatusWeight: Record<TaskStatus, number> = { todo: 0, in_progress: .5, in_review: .8, done: 1 };
+const stageTaskStatusLabel: Record<StageTaskStatus, string> = { todo: '未开始', in_progress: '进行中', blocked: '受阻', pending_verification: '待验收', done: '已完成' };
+const stageTaskPriorityLabel: Record<StageTaskPriority, string> = { urgent: '紧急', important: '重要', normal: '正常', low: '低' };
+const stageTaskTransitions: Record<StageTaskStatus, StageTaskStatus[]> = { todo: ['in_progress'], in_progress: ['done', 'blocked'], blocked: ['pending_verification'], pending_verification: ['done'], done: [] };
 
-type Route = { page: 'overview' | 'sprint' | 'sprints' | 'backlog' | 'reports' | 'members' | 'integrations' | 'settings' | 'stages' | 'stage-workbench' | 'project-new' | 'not-found'; sprintId: number | null; projectId: number; stageId: number | null };
+type Route = { page: 'overview' | 'sprint' | 'sprints' | 'backlog' | 'reports' | 'members' | 'integrations' | 'settings' | 'stages' | 'stage-workbench' | 'project-new' | 'my-tasks' | 'not-found'; sprintId: number | null; projectId: number; stageId: number | null };
 type Notice = { id: string; type: 'scope' | 'start' | 'end'; title: string; detail: string; sprintId: number; changeId?: number; read?: boolean };
 
 function readRoute(): Route {
@@ -33,6 +36,7 @@ function readRoute(): Route {
   const sprintId = Number(new URLSearchParams(window.location.search).get('sprint_id')) || null;
   const base = { sprintId, projectId, stageId: null as number | null };
   if (!parts.length) return { page: 'overview', ...base };
+  if (parts[0] === 'my-tasks') return { page: 'my-tasks', ...base };
   if (parts[0] !== 'projects') return { page: 'not-found', ...base };
   if (parts[1] === 'new') return { page: 'project-new', ...base };
   const routeProjectId = Number(parts[1]) || projectId;
@@ -101,7 +105,7 @@ function AppShell(props: { children: React.ReactNode; project: { name: string } 
   const { route, currentSprint } = props;
   const nav = (page: Route['page'], path: string, label?: string, icon?: React.ReactNode) => <a className={`nav-item ${route.page === page || (page === 'sprint' && route.page === 'sprints') || (page === 'stages' && route.page === 'stage-workbench') ? 'active' : ''}`} href={path}><span className="nav-icon">{icon ?? (page === 'overview' ? <LayoutDashboard size={17} /> : page === 'sprint' || page === 'sprints' ? <Activity size={17} /> : page === 'reports' ? <BarChart3 size={17} /> : page === 'backlog' ? <Archive size={17} /> : page === 'members' ? <Users size={17} /> : page === 'integrations' ? <GitBranch size={17} /> : page === 'stages' ? <Milestone size={17} /> : <Settings2 size={17} />)}</span><span>{label ?? (page === 'backlog' ? 'Backlog' : page === 'sprint' || page === 'sprints' ? '迭代看板' : page === 'stages' ? '阶段' : page === 'overview' ? '总览' : page === 'reports' ? '报告' : page === 'members' ? '成员' : page === 'integrations' ? '集成' : '设置')}</span></a>;
   const unread = props.notices.filter((item) => !item.read).length;
-  return <div className="app-shell"><aside className="sidebar"><div className="brand"><div className="brand-mark"><Zap size={16} fill="currentColor" /></div><span>vibe<span className="brand-accent">pm</span></span></div><div className="workspace-switch"><div className="workspace-icon">V</div><div><b>{props.project?.name || 'Vibe PM'}</b><small>项目工作区</small></div><ChevronDown size={15} /></div><nav>{nav('overview', `/projects/${projectId}`)}{nav('sprint', currentSprint ? sprintPath(currentSprint.id) : `/projects/${projectId}/sprints`)}{nav('reports', `/projects/${projectId}/reports/${currentSprint?.id || ''}`)}{nav('backlog', `/projects/${projectId}/backlog`)}{nav('stages', `/projects/${projectId}/stages`)}</nav><div className="nav-label">工作区</div><nav>{nav('members', `/projects/${projectId}/members`)}{nav('integrations', `/projects/${projectId}/integrations`)}{nav('project-new', '/projects/new', '新建项目', <Plus size={17} />)}</nav><div className="sidebar-bottom">{nav('settings', `/projects/${projectId}/settings`)}<AntUserMenu isOwner={props.isOwner} /></div></aside><main className="main"><header className="topbar"><div className="breadcrumbs"><a href={`/projects/${projectId}`}>{props.project?.name || 'Vibe PM'}</a><span>/</span><div className="sprint-picker"><button className="breadcrumb-button" onClick={() => props.setSprintMenu(!props.sprintMenu)}>{currentSprint?.name || '选择迭代'} <ChevronDown size={13} /></button>{props.sprintMenu && <SprintMenu sprints={props.sprints} selectedId={currentSprint?.id} onSelect={props.onSprintSelect} />}</div>{currentSprint && <span className={`status-pill ${statusTone[currentSprint.status]}`}><i /> {statusLabel[currentSprint.status]}</span>}</div><div className="top-actions"><button className="icon-btn notification-button" title="通知" onClick={() => props.setDrawer(props.drawer === 'notifications' ? null : 'notifications')}><Bell size={18} />{unread > 0 && <em>{unread}</em>}</button><button className="avatar avatar-blue avatar-button" title="打开用户菜单" onClick={() => props.setDrawer(props.drawer === 'user' ? null : 'user')}>XM</button></div></header><div className="content">{props.children}</div></main>{props.drawer === 'notifications' && <AntNotificationDrawer notices={props.notices} setNotices={props.setNotices} close={() => props.setDrawer(null)} />}{props.drawer === 'user' && <UserMenu isOwner={props.isOwner} close={() => props.setDrawer(null)} />}</div>;
+  return <div className="app-shell"><aside className="sidebar"><div className="brand"><div className="brand-mark"><Zap size={16} fill="currentColor" /></div><span>vibe<span className="brand-accent">pm</span></span></div><div className="workspace-switch"><div className="workspace-icon">V</div><div><b>{props.project?.name || 'Vibe PM'}</b><small>项目工作区</small></div><ChevronDown size={15} /></div><nav>{nav('overview', `/projects/${projectId}`)}{nav('sprint', currentSprint ? sprintPath(currentSprint.id) : `/projects/${projectId}/sprints`)}{nav('reports', `/projects/${projectId}/reports/${currentSprint?.id || ''}`)}{nav('backlog', `/projects/${projectId}/backlog`)}{nav('stages', `/projects/${projectId}/stages`)}{nav('my-tasks', '/my-tasks', '我的任务', <ListTodo size={17} />)}</nav><div className="nav-label">工作区</div><nav>{nav('members', `/projects/${projectId}/members`)}{nav('integrations', `/projects/${projectId}/integrations`)}{nav('project-new', '/projects/new', '新建项目', <Plus size={17} />)}</nav><div className="sidebar-bottom">{nav('settings', `/projects/${projectId}/settings`)}<AntUserMenu isOwner={props.isOwner} /></div></aside><main className="main"><header className="topbar"><div className="breadcrumbs"><a href={`/projects/${projectId}`}>{props.project?.name || 'Vibe PM'}</a><span>/</span><div className="sprint-picker"><button className="breadcrumb-button" onClick={() => props.setSprintMenu(!props.sprintMenu)}>{currentSprint?.name || '选择迭代'} <ChevronDown size={13} /></button>{props.sprintMenu && <SprintMenu sprints={props.sprints} selectedId={currentSprint?.id} onSelect={props.onSprintSelect} />}</div>{currentSprint && <span className={`status-pill ${statusTone[currentSprint.status]}`}><i /> {statusLabel[currentSprint.status]}</span>}</div><div className="top-actions"><button className="icon-btn notification-button" title="通知" onClick={() => props.setDrawer(props.drawer === 'notifications' ? null : 'notifications')}><Bell size={18} />{unread > 0 && <em>{unread}</em>}</button><button className="avatar avatar-blue avatar-button" title="打开用户菜单" onClick={() => props.setDrawer(props.drawer === 'user' ? null : 'user')}>XM</button></div></header><div className="content">{props.children}</div></main>{props.drawer === 'notifications' && <AntNotificationDrawer notices={props.notices} setNotices={props.setNotices} close={() => props.setDrawer(null)} />}{props.drawer === 'user' && <UserMenu isOwner={props.isOwner} close={() => props.setDrawer(null)} />}</div>;
 }
 
 function AntNotificationDrawer({ notices, setNotices, close }: { notices: Notice[]; setNotices: React.Dispatch<React.SetStateAction<Notice[]>>; close: () => void }) { return <AntDrawer title="通知" open onClose={close} placement="right" width={360} destroyOnHidden>{notices.length ? <div className="notice-list">{notices.map((notice) => <button className={`notice-row ${notice.read ? 'read' : ''}`} key={notice.id} onClick={() => { setNotices((items) => items.map((item) => item.id === notice.id ? { ...item, read: true } : item)); navigate(sprintPath(notice.sprintId)); close(); }}><span className={`notice-dot ${notice.type}`} /><span><b>{notice.title}</b><small>{notice.detail}</small></span>{!notice.read && <i />}</button>)}</div> : <Empty description="范围变更和迭代状态更新会显示在这里" />}</AntDrawer>; }
@@ -114,7 +118,8 @@ function UserMenu({ isOwner, close }: { isOwner: boolean; close: () => void }) {
 function PageContent({ route, currentSprint, currentSprintId, sprints, members, isOwner, project, onRefresh, onToast, onNotice, setSprints, setProject }: { route: Route; currentSprint: Sprint | null; currentSprintId: number | null; sprints: Sprint[]; members: Array<{ id: string; name: string; email: string; role: string }>; isOwner: boolean; project: { id: number; name: string; description: string | null } | null; onRefresh: () => Promise<void>; onToast: (message: string) => void; onNotice: (change: ScopeChange, sprintId: number) => void; setSprints: React.Dispatch<React.SetStateAction<Sprint[]>>; setProject: React.Dispatch<React.SetStateAction<{ id: number; name: string; description: string | null } | null>> }) {
   if (route.page === 'project-new') return <ProjectCreatePage onToast={onToast} />;
   if (route.page === 'stages') return <StageListPage routeProjectId={route.projectId} onToast={onToast} />;
-  if (route.page === 'stage-workbench') return <StageWorkbenchPage routeProjectId={route.projectId} stageId={route.stageId} />;
+  if (route.page === 'stage-workbench') return <StageWorkbenchPage routeProjectId={route.projectId} stageId={route.stageId} onToast={onToast} />;
+  if (route.page === 'my-tasks') return <MyTasksPage />;
   if (route.page === 'overview') return <OverviewPage sprint={currentSprint} sprints={sprints} onRefresh={onRefresh} onToast={onToast} />;
   if (route.page === 'sprints') return <SprintListPage sprints={sprints} onCreate={(sprint) => { setSprints((items) => [sprint, ...items]); navigate(sprintPath(sprint.id)); }} onToast={onToast} />;
   if (route.page === 'backlog') return <BacklogPage currentSprint={currentSprint} sprints={sprints} onRefresh={onRefresh} onToast={onToast} />;
@@ -373,17 +378,194 @@ function StageCompleteModal({ routeProjectId, stage, activeStages, onClose, onDo
   </div></Modal>;
 }
 
-function StageWorkbenchPage({ routeProjectId, stageId }: { routeProjectId: number; stageId: number | null }) {
+function StageWorkbenchPage({ routeProjectId, stageId, onToast }: { routeProjectId: number; stageId: number | null; onToast: (message: string) => void }) {
   const [stage, setStage] = useState<Stage | null>(null);
+  const [stages, setStages] = useState<Stage[]>([]);
+  const [tasks, setTasks] = useState<StageTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const load = () => { setLoading(true); setError(null); apiClient.listStages(routeProjectId).then((stages) => setStage(stages.find((item) => item.id === stageId) || null)).catch((err) => setError(errorText(err))).finally(() => setLoading(false)); };
-  useEffect(load, [routeProjectId, stageId]);
-  if (error) return <ErrorState message={error} retry={load} />;
+  const [filters, setFilters] = useState<{ status: string; priority: string; assignee: string; search: string; sort: string }>({ status: '', priority: '', assignee: '', search: '', sort: 'created_at' });
+  const [modal, setModal] = useState<null | { kind: 'create' } | { kind: 'edit'; task: StageTask } | { kind: 'status'; task: StageTask } | { kind: 'move'; task: StageTask } | { kind: 'delete'; task: StageTask }>(null);
+  const [saving, setSaving] = useState(false);
+
+  const writable = stage?.status !== 'completed';
+  const loadStage = () => apiClient.listStages(routeProjectId).then((list) => { setStages(list); setStage(list.find((item) => item.id === stageId) || null); }).catch((err) => setError(errorText(err)));
+  const loadTasks = () => {
+    if (stageId == null) return Promise.resolve();
+    const query: Record<string, string> = {};
+    if (filters.status) query.status = filters.status;
+    if (filters.priority) query.priority = filters.priority;
+    if (filters.assignee) query.assignee = filters.assignee;
+    if (filters.search) query.search = filters.search;
+    query.sort = filters.sort;
+    return apiClient.listStageTasks(routeProjectId, stageId, query).then(setTasks).catch((err) => setError(errorText(err)));
+  };
+  useEffect(() => { if (stageId == null) return; setLoading(true); setError(null); Promise.all([loadStage(), loadTasks()]).finally(() => setLoading(false)); }, [routeProjectId, stageId]);
+  useEffect(() => { if (stageId == null || loading) return; setError(null); void loadTasks(); }, [filters, stageId, loading]);
+
+  const assignees = [...new Set(tasks.map((task) => task.assignee || '未分配'))];
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (stageId == null || !modal || modal.kind === 'delete') return;
+    setSaving(true);
+    const form = new FormData(event.currentTarget);
+    const reason = String(form.get('reason') || '') || undefined;
+    try {
+      if (modal.kind === 'create') {
+        await apiClient.createStageTask(routeProjectId, stageId, {
+          project_id: routeProjectId,
+          stage_id: stageId,
+          title: String(form.get('title')).trim(),
+          description: String(form.get('description') || '') || null,
+          priority: String(form.get('priority')) as StageTaskPriority,
+          assignee: String(form.get('assignee') || '') || null,
+          planned_date: String(form.get('planned_date') || '') || null,
+          status: String(form.get('status')) as StageTaskStatus,
+        });
+        onToast('任务已创建');
+      } else if (modal.kind === 'edit') {
+        await apiClient.updateStageTask(routeProjectId, modal.task.id, {
+          title: String(form.get('title')).trim(),
+          description: String(form.get('description') || '') || null,
+          priority: String(form.get('priority')) as StageTaskPriority,
+          assignee: String(form.get('assignee') || '') || null,
+          planned_date: String(form.get('planned_date') || '') || null,
+        });
+        onToast('任务已更新');
+      } else if (modal.kind === 'status') {
+        await apiClient.updateStageTask(routeProjectId, modal.task.id, { status: String(form.get('status')) as StageTaskStatus, reason });
+        onToast('任务状态已更新');
+      } else if (modal.kind === 'move') {
+        await apiClient.moveStageTask(routeProjectId, modal.task.id, { target_stage_id: form.get('target_stage_id') ? Number(form.get('target_stage_id')) : null, reason });
+        onToast('任务已移动');
+      }
+      setModal(null);
+      await loadTasks();
+    } catch (err) { onToast(errorText(err)); } finally { setSaving(false); }
+  };
+  const runDelete = async (task: StageTask) => {
+    setSaving(true);
+    try { await apiClient.deleteStageTask(routeProjectId, task.id); onToast('任务已删除'); setModal(null); await loadTasks(); }
+    catch (err) { onToast(errorText(err)); } finally { setSaving(false); }
+  };
+
+  if (stageId == null) return <><PageHeader eyebrow="STAGE" title="阶段工作台" /><EmptyState title="缺少阶段参数" copy="请通过阶段列表进入。" action={<button className="primary-btn" onClick={() => navigate(`/projects/${routeProjectId}/stages`)}><Milestone size={15} /> 返回阶段列表</button>} /></>;
   if (loading) return <LoadingState />;
+  if (error) return <ErrorState message={error} retry={() => { setLoading(true); setError(null); Promise.all([loadStage(), loadTasks()]).finally(() => setLoading(false)); }} />;
   if (!stage) return <><PageHeader eyebrow="STAGE" title="阶段工作台" /><EmptyState title="阶段不存在" copy="它可能已被删除，返回阶段列表查看。" action={<button className="primary-btn" onClick={() => navigate(`/projects/${routeProjectId}/stages`)}><Milestone size={15} /> 返回阶段列表</button>} /></>;
-  return <><PageHeader eyebrow="STAGE WORKBENCH" title={stage.name} copy={stage.goal || '暂无阶段目标'} actions={<><span className={`status-pill ${stageStatusTone[stage.status]}`}><i /> {stageStatusLabel[stage.status]}</span>{stage.status === 'active' && <span className={`role-tag ${stage.is_primary ? 'owner' : ''}`}>{stage.is_primary ? '主阶段' : '并行阶段'}</span>}</>} />
-    <section className="panel stage-workbench"><div className="overview-sprint"><div><span>顺序</span><b>第 {stage.position + 1} 阶段</b></div><div><span>负责人</span><b>{stage.owner_id || '未指定'}</b></div><div><span>计划日期</span><b>{stage.planned_start || stage.planned_end ? `${formatDate(stage.planned_start)} - ${formatDate(stage.planned_end)}` : '未排期'}</b></div></div><p className="permission-note"><Milestone size={14} /> 阶段任务管理与交付物将在后续迭代提供，当前为工作台占位页。</p><button className="text-btn" onClick={() => navigate(`/projects/${routeProjectId}/stages`)}>返回阶段列表 <span>→</span></button></section></>;
+  return <><PageHeader eyebrow="STAGE WORKBENCH" title={stage.name} copy={stage.goal || '暂无阶段目标'} actions={<><span className={`status-pill ${stageStatusTone[stage.status]}`}><i /> {stageStatusLabel[stage.status]}</span>{stage.status === 'active' && <span className={`role-tag ${stage.is_primary ? 'owner' : ''}`}>{stage.is_primary ? '主阶段' : '并行阶段'}</span>}{writable && <button className="primary-btn" onClick={() => setModal({ kind: 'create' })}><Plus size={15} /> 新建任务</button>}</>} />
+    <section className="panel stage-workbench">
+      <div className="overview-sprint"><div><span>顺序</span><b>第 {stage.position + 1} 阶段</b></div><div><span>负责人</span><b>{stage.owner_id || '未指定'}</b></div><div><span>计划日期</span><b>{stage.planned_start || stage.planned_end ? `${formatDate(stage.planned_start)} - ${formatDate(stage.planned_end)}` : '未排期'}</b></div></div>
+      {!writable && <p className="permission-note"><Milestone size={14} /> 该阶段已完成，任务列表为只读状态。</p>}
+      <div className="toolbar">
+        <input className="search-input" placeholder="搜索任务标题" value={filters.search} onChange={(event) => setFilters((f) => ({ ...f, search: event.target.value }))} />
+        <select value={filters.status} onChange={(event) => setFilters((f) => ({ ...f, status: event.target.value }))}><option value="">全部状态</option>{Object.keys(stageTaskStatusLabel).map((key) => <option key={key} value={key}>{stageTaskStatusLabel[key as StageTaskStatus]}</option>)}</select>
+        <select value={filters.priority} onChange={(event) => setFilters((f) => ({ ...f, priority: event.target.value }))}><option value="">全部优先级</option>{Object.keys(stageTaskPriorityLabel).map((key) => <option key={key} value={key}>{stageTaskPriorityLabel[key as StageTaskPriority]}</option>)}</select>
+        <select value={filters.assignee} onChange={(event) => setFilters((f) => ({ ...f, assignee: event.target.value }))}><option value="">全部负责人</option>{assignees.map((name) => <option key={name} value={name}>{name}</option>)}</select>
+        <select value={filters.sort} onChange={(event) => setFilters((f) => ({ ...f, sort: event.target.value }))}>
+          <option value="created_at">创建时间 ↑</option><option value="-created_at">创建时间 ↓</option>
+          <option value="planned_date">计划日期 ↑</option><option value="-planned_date">计划日期 ↓</option>
+          <option value="priority">优先级 ↑</option><option value="-priority">优先级 ↓</option>
+        </select>
+      </div>
+      {tasks.length ? <div className="table-wrap"><table>
+        <thead><tr><th>标题</th><th>负责人</th><th>优先级</th><th>计划日期</th><th>状态</th>{writable && <th></th>}</tr></thead>
+        <tbody>{tasks.map((task) => <tr key={task.id}>
+          <td className="task-title">{task.title}</td>
+          <td>{task.assignee || '未分配'}</td>
+          <td><span className={`role-tag priority-${task.priority}`}>{stageTaskPriorityLabel[task.priority]}</span></td>
+          <td>{formatDate(task.planned_date)}</td>
+          <td><span className={`status-pill ${task.status}`}>{stageTaskStatusLabel[task.status]}</span></td>
+          {writable && <td><div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+            <button className="icon-btn" title="编辑任务" onClick={() => setModal({ kind: 'edit', task })}><Pencil size={14} /></button>
+            <button className="icon-btn" title="变更状态" onClick={() => setModal({ kind: 'status', task })}><RefreshCw size={14} /></button>
+            <button className="icon-btn" title="移动阶段" onClick={() => setModal({ kind: 'move', task })}><ArrowRight size={14} /></button>
+            <button className="icon-btn danger" title="删除任务" onClick={() => setModal({ kind: 'delete', task })}><Trash2 size={14} /></button>
+          </div></td>}
+        </tr>)}</tbody>
+      </table></div> : <EmptyState title="暂无任务" copy="该阶段下还没有任务，点击右上角新建任务开始。" />}
+      <button className="text-btn" onClick={() => navigate(`/projects/${routeProjectId}/stages`)}>返回阶段列表 <span>→</span></button>
+    </section>
+    {modal && <StageTaskModal kind={modal.kind} stage={stage} stages={stages} task={modal.kind === 'create' ? null : modal.task} onClose={() => setModal(null)} onSubmit={submit} onDelete={runDelete} saving={saving} />}
+  </>;
+}
+
+function StageTaskModal({ kind, stage, stages, task, onClose, onSubmit, onDelete, saving }: { kind: 'create' | 'edit' | 'status' | 'move' | 'delete'; stage: Stage; stages: Stage[]; task: StageTask | null; onClose: () => void; onSubmit: (event: React.FormEvent<HTMLFormElement>) => void; onDelete: (task: StageTask) => void; saving: boolean }) {
+  const title = kind === 'create' ? '新建任务' : kind === 'edit' ? `编辑「${task?.title}」` : kind === 'status' ? `变更状态「${task?.title}」` : kind === 'move' ? `移动任务「${task?.title}」` : `删除「${task?.title}」`;
+  if (kind === 'delete') return <Modal title={title} close={onClose}><div className="form-stack"><p>确定删除该任务吗？此操作不可撤销。</p><div className="form-grid"><button className="ghost-btn" onClick={onClose}>取消</button><button className="primary-btn danger" disabled={saving} onClick={() => task && onDelete(task)}>{saving ? '删除中…' : '确认删除'}</button></div></div></Modal>;
+  const statusOptions = task ? [task.status, ...stageTaskTransitions[task.status]] : (Object.keys(stageTaskStatusLabel) as StageTaskStatus[]);
+  const moveTargets = stages.filter((item) => item.id !== stage.id && item.status !== 'completed');
+  return <Modal title={title} close={onClose}>
+    <form className="form-stack" onSubmit={onSubmit}>
+      {(kind === 'create' || kind === 'edit') && <>
+        <label>标题<input name="title" defaultValue={task?.title || ''} required placeholder="任务标题" /></label>
+        <label>描述<textarea name="description" defaultValue={task?.description || ''} placeholder="补充信息（可选）" /></label>
+        <label>优先级<select name="priority" defaultValue={task?.priority || 'normal'}>{Object.keys(stageTaskPriorityLabel).map((key) => <option key={key} value={key}>{stageTaskPriorityLabel[key as StageTaskPriority]}</option>)}</select></label>
+        <label>负责人<input name="assignee" defaultValue={task?.assignee || ''} placeholder="负责人（可选）" /></label>
+        <label>计划日期<input name="planned_date" type="date" defaultValue={task?.planned_date || ''} /></label>
+      </>}
+      {kind === 'create' && <label>初始状态<select name="status" defaultValue="todo">{statusOptions.map((key) => <option key={key} value={key}>{stageTaskStatusLabel[key]}</option>)}</select></label>}
+      {kind === 'status' && <>
+        <label>新状态<select name="status" defaultValue={statusOptions[statusOptions.length - 1]}>{statusOptions.map((key) => <option key={key} value={key}>{stageTaskStatusLabel[key]}</option>)}</select></label>
+        <label>变更原因<textarea name="reason" placeholder="可选，记录状态变更原因" /></label>
+      </>}
+      {kind === 'move' && <>
+        <label>目标阶段<select name="target_stage_id" defaultValue="">
+          <option value="">未规划（移出阶段）</option>
+          {moveTargets.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+        </select></label>
+        <label>移动原因<textarea name="reason" placeholder={stage.status === 'active' ? '移出进行中阶段需填写原因' : '可选'} /></label>
+      </>}
+      <div className="form-grid">
+        <button type="button" className="ghost-btn" onClick={onClose}>取消</button>
+        <button type="submit" className="primary-btn" disabled={saving}>{saving ? '保存中…' : kind === 'create' ? '创建任务' : '保存'}</button>
+      </div>
+    </form>
+  </Modal>;
+}
+
+function MyTasksPage() {
+  const [tasks, setTasks] = useState<MyTask[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [filters, setFilters] = useState<{ project: string; stage: string; status: string; priority: string; sort: string }>({ project: '', stage: '', status: '', priority: '', sort: 'planned_date' });
+  const load = () => {
+    setLoading(true); setError(null);
+    const params: { project_id?: number; stage_id?: number; status?: string; priority?: string; sort?: string } = { sort: filters.sort };
+    if (filters.project) params.project_id = Number(filters.project);
+    if (filters.stage) params.stage_id = Number(filters.stage);
+    if (filters.status) params.status = filters.status;
+    if (filters.priority) params.priority = filters.priority;
+    apiClient.listMyTasks(params).then(setTasks).catch((err) => setError(errorText(err))).finally(() => setLoading(false));
+  };
+  useEffect(() => { void load(); }, [filters]);
+  const projects = [...new Map(tasks.map((task) => [task.project_id, { id: task.project_id, name: task.project_name }])).values()];
+  const stages = [...new Map(tasks.filter((task) => task.stage_id != null).map((task) => [task.stage_id as number, { id: task.stage_id as number, name: task.stage_name || '未命名' }])).values()];
+  return <><PageHeader eyebrow="MY TASKS" title="我的任务" copy="跨项目查看指派给你的进行中任务。" actions={<button className="primary-btn" onClick={() => void load()}><RefreshCw size={15} /> 刷新</button>} />
+    <section className="panel stage-workbench">
+      <div className="toolbar">
+        <select value={filters.project} onChange={(event) => setFilters((f) => ({ ...f, project: event.target.value }))}><option value="">全部项目</option>{projects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
+        <select value={filters.stage} onChange={(event) => setFilters((f) => ({ ...f, stage: event.target.value }))}><option value="">全部阶段</option>{stages.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
+        <select value={filters.status} onChange={(event) => setFilters((f) => ({ ...f, status: event.target.value }))}><option value="">全部状态</option>{Object.keys(stageTaskStatusLabel).map((key) => <option key={key} value={key}>{stageTaskStatusLabel[key as StageTaskStatus]}</option>)}</select>
+        <select value={filters.priority} onChange={(event) => setFilters((f) => ({ ...f, priority: event.target.value }))}><option value="">全部优先级</option>{Object.keys(stageTaskPriorityLabel).map((key) => <option key={key} value={key}>{stageTaskPriorityLabel[key as StageTaskPriority]}</option>)}</select>
+        <select value={filters.sort} onChange={(event) => setFilters((f) => ({ ...f, sort: event.target.value }))}>
+          <option value="planned_date">计划日期 ↑</option><option value="-planned_date">计划日期 ↓</option>
+          <option value="created_at">创建时间 ↑</option><option value="-created_at">创建时间 ↓</option>
+          <option value="priority">优先级 ↑</option><option value="-priority">优先级 ↓</option>
+        </select>
+      </div>
+      {error ? <ErrorState message={error} retry={load} /> : loading ? <LoadingState /> : !tasks.length ? <EmptyState title="暂无任务" copy="没有指派给你的进行中任务。" /> : <div className="table-wrap"><table>
+        <thead><tr><th>项目</th><th>阶段</th><th>标题</th><th>优先级</th><th>计划日期</th><th>状态</th></tr></thead>
+        <tbody>{tasks.map((task) => <tr key={task.id}>
+          <td><a className="link" href={`/projects/${task.project_id}/stages/${task.stage_id ?? ''}`}>{task.project_name}</a></td>
+          <td>{task.stage_id ? <a className="link" href={`/projects/${task.project_id}/stages/${task.stage_id}`}>{task.stage_name || '未命名'}</a> : '未规划'}</td>
+          <td className="task-title">{task.title}{task.overdue && <span className="flag-overdue">逾期</span>}{task.blocked && <span className="flag-blocked">受阻</span>}</td>
+          <td><span className={`role-tag priority-${task.priority}`}>{stageTaskPriorityLabel[task.priority]}</span></td>
+          <td>{formatDate(task.planned_date)}</td>
+          <td><span className={`status-pill ${task.status}`}>{stageTaskStatusLabel[task.status]}</span></td>
+        </tr>)}</tbody>
+      </table></div>}
+    </section></>;
 }
 
 function Modal({ title, children, close }: { title: string; children: React.ReactNode; close: () => void }) { return <AntModal open title={title} footer={null} onCancel={close} destroyOnHidden>{children}</AntModal>; }
