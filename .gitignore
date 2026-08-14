@@ -3,3 +3,6 @@ backend/logs/
 frontend/logs/
 *.log
 *.out
+
+# 指向外部仓库的绝对路径 symlink（demo-page-builder 技能），不纳入版本控制
+.codebuddy/skills/demo-page-builder
