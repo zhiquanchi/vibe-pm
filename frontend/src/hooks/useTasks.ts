@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
-import { apiClient } from '../api';
-import type { Task, TaskCreateInput, TaskUpdateInput } from '../types';
+import { apiClient } from '@/services/api';
+import type { Task, TaskCreateInput, TaskUpdateInput } from '@/types';
 import { apiErrorMessage, useAsyncResource } from './useAsyncResource';
 
 export function useTasks(sprintId?: number) {

@@ -1,5 +1,5 @@
-import { apiClient } from '../api';
-import type { SprintSnapshot } from '../types';
+import { apiClient } from '@/services/api';
+import type { SprintSnapshot } from '@/types';
 import { useAsyncResource } from './useAsyncResource';
 
 export function useSnapshots(sprintId: number | null) {

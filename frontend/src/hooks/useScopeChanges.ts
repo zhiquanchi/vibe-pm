@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
-import { apiClient } from '../api';
-import type { ScopeChange, ScopeChangeCreateInput } from '../types';
+import { apiClient } from '@/services/api';
+import type { ScopeChange, ScopeChangeCreateInput } from '@/types';
 import { apiErrorMessage, useAsyncResource } from './useAsyncResource';
 
 export function useScopeChanges(sprintId: number | null) {

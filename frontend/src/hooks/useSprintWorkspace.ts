@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
-import { apiClient } from '../api';
-import type { SprintStatus, TaskUpdateInput } from '../types';
+import { apiClient } from '@/services/api';
+import type { SprintStatus, TaskUpdateInput } from '@/types';
 import { apiErrorMessage } from './useAsyncResource';
 import { useScopeChanges } from './useScopeChanges';
 import { useSnapshots } from './useSnapshots';
