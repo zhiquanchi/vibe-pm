@@ -1,6 +1,20 @@
-import { AlertTriangle, ArrowDownLeft, ArrowUpRight, Clock3, Inbox, Loader2, Minus, Pencil, Plus, UserRound } from 'lucide-react';
-import type { ScopeChange, ScopeChangeType } from '../types';
+import type { ComponentType, CSSProperties } from 'react';
+import {
+  FallOutlined,
+  RiseOutlined,
+  ClockCircleOutlined,
+  EditOutlined,
+  ExclamationCircleOutlined,
+  InboxOutlined,
+  LoadingOutlined,
+  MinusOutlined,
+  PlusOutlined,
+  UserOutlined,
+} from '@ant-design/icons';
+import type { ScopeChange, ScopeChangeType } from '@/types';
 import './ScopeTimeline.css';
+
+type IconComponent = ComponentType<{ style?: CSSProperties; className?: string }>;
 
 export interface ScopeTimelineProps {
   /** 按时间倒序展示的范围变更；组件也会在渲染前再次排序。 */
@@ -15,10 +29,10 @@ export interface ScopeTimelineProps {
   className?: string;
 }
 
-const typeMeta: Record<ScopeChangeType, { label: string; icon: typeof Plus; tone: string }> = {
-  add_task: { label: '新增需求', icon: Plus, tone: 'add' },
-  remove_task: { label: '移出需求', icon: Minus, tone: 'remove' },
-  change_points: { label: '修改点数', icon: Pencil, tone: 'change' },
+const typeMeta: Record<ScopeChangeType, { label: string; icon: IconComponent; tone: string }> = {
+  add_task: { label: '新增需求', icon: PlusOutlined, tone: 'add' },
+  remove_task: { label: '移出需求', icon: MinusOutlined, tone: 'remove' },
+  change_points: { label: '修改点数', icon: EditOutlined, tone: 'change' },
 };
 
 function formatDate(value: string) {
@@ -62,7 +76,7 @@ export function ScopeTimeline({
         </div>
         {onAddTask && (
           <button className="scope-timeline__add-button" type="button" onClick={onAddTask}>
-            <Plus size={15} aria-hidden="true" />
+            <PlusOutlined style={{ fontSize: 15 }} aria-hidden="true" />
             <span>新增需求</span>
           </button>
         )}
@@ -70,31 +84,31 @@ export function ScopeTimeline({
 
       {capacityWarning && (
         <div className="scope-timeline__warning" role="status">
-          <AlertTriangle size={16} aria-hidden="true" />
+          <ExclamationCircleOutlined style={{ fontSize: 16 }} aria-hidden="true" />
           <span>{warningText}</span>
         </div>
       )}
 
       {loading ? (
         <div className="scope-timeline__state" role="status">
-          <Loader2 className="scope-timeline__spinner" size={20} aria-hidden="true" />
+          <LoadingOutlined className="scope-timeline__spinner" style={{ fontSize: 20 }} spin aria-hidden="true" />
           <span>正在加载变更记录…</span>
         </div>
       ) : sortedChanges.length === 0 ? (
         <div className="scope-timeline__state">
-          <Inbox size={22} aria-hidden="true" />
+          <InboxOutlined style={{ fontSize: 22 }} aria-hidden="true" />
           <strong>暂无范围变更</strong>
           <span>新增或调整需求后，记录会显示在这里</span>
           {onAddTask && (
             <button type="button" className="scope-timeline__empty-action" onClick={onAddTask}>
-              <Plus size={14} aria-hidden="true" /> 添加第一条需求
+              <PlusOutlined style={{ fontSize: 14 }} aria-hidden="true" /> 添加第一条需求
             </button>
           )}
         </div>
       ) : (
         <ol className="scope-timeline__list">
           {sortedChanges.map((change) => {
-            const meta = typeMeta[change.type] ?? { label: '范围变更', icon: Clock3, tone: 'change' };
+            const meta = typeMeta[change.type] ?? { label: '范围变更', icon: ClockCircleOutlined, tone: 'change' };
             const Icon = meta.icon;
             const isPositive = change.points_delta > 0;
             const deltaClass = isPositive ? 'positive' : change.points_delta < 0 ? 'negative' : 'neutral';
@@ -102,7 +116,7 @@ export function ScopeTimeline({
             return (
               <li className="scope-timeline__item" key={change.id}>
                 <div className={`scope-timeline__marker scope-timeline__marker--${meta.tone}`} aria-hidden="true">
-                  <Icon size={13} strokeWidth={2.5} />
+                  <Icon style={{ fontSize: 13 }} />
                 </div>
                 <button
                   type="button"
@@ -121,7 +135,7 @@ export function ScopeTimeline({
                     <span className={`scope-timeline__type scope-timeline__type--${meta.tone}`}>{meta.label}</span>
                   </div>
                   {change.reason && <p className="scope-timeline__reason">原因：{change.reason}</p>}
-                  <p className="scope-timeline__author"><UserRound size={12} aria-hidden="true" /> 操作人：{change.created_by || '未知'}</p>
+                  <p className="scope-timeline__author"><UserOutlined style={{ fontSize: 12 }} aria-hidden="true" /> 操作人：{change.created_by || '未知'}</p>
                 </button>
                 {(change.type === 'remove_task' && onRemoveTask) || (change.type === 'change_points' && onChangePoints) ? (
                   <div className="scope-timeline__actions">
@@ -141,8 +155,8 @@ export function ScopeTimeline({
 
       {!loading && sortedChanges.length > 0 && (
         <div className="scope-timeline__footer">
-          <span><ArrowUpRight size={13} aria-hidden="true" /> 增加</span>
-          <span><ArrowDownLeft size={13} aria-hidden="true" /> 减少</span>
+          <span><RiseOutlined style={{ fontSize: 13 }} aria-hidden="true" /> 增加</span>
+          <span><FallOutlined style={{ fontSize: 13 }} aria-hidden="true" /> 减少</span>
           <span>{sortedChanges.length} 条记录</span>
         </div>
       )}

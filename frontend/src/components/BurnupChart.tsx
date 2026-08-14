@@ -1,17 +1,14 @@
 import { useMemo, useRef, useState } from 'react';
-import {
-  Area,
-  CartesianGrid,
-  ComposedChart,
-  Line,
-  ReferenceDot,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
-import type { ScopeChange, ScopeChangeType, SprintSnapshot } from '../types';
+import ReactECharts from 'echarts-for-react';
+import type { EChartsOption } from 'echarts';
+import type { ScopeChange, ScopeChangeType, SprintSnapshot } from '@/types';
 import './BurnupChart.css';
+
+const THEME_PURPLE = '#7056df';
+const SCOPE_BLUE = '#3b82f6';
+const IDEAL_GRAY = '#9ca3af';
+const COMPLETED_GREEN = '#22c55e';
+const REMAINING_RED = '#ef4444';
 
 const changeTypeLabel = (type: ScopeChangeType): string => {
   switch (type) {
@@ -70,29 +67,6 @@ function buildPoints(snapshots: SprintSnapshot[], initialPoints?: number): Chart
   }));
 }
 
-function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ dataKey?: string; value?: number; color?: string }>; label?: string }) {
-  if (!active || !payload?.length) return null;
-  const labels: Record<string, string> = {
-    scope: '范围',
-    completed: '已完成',
-    remaining: '剩余',
-    ideal: '理想进度',
-    idealRemaining: '理想剩余',
-  };
-  return (
-    <div className="burnup-tooltip">
-      <strong>{label}</strong>
-      {payload.map((item) => (
-        <div key={item.dataKey}>
-          <span style={{ color: item.color }}>●</span>
-          {labels[item.dataKey ?? ''] ?? item.dataKey}
-          <b>{item.value ?? 0} pt</b>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export function BurnupChart({ snapshots, scopeChanges = [], initialPoints, className = '', onSelectChange }: BurnupChartProps) {
   const [mode, setMode] = useState<ChartMode>('burnup');
   const [hovered, setHovered] = useState<{ change: ScopeChange; x: number; y: number } | null>(null);
@@ -112,7 +86,143 @@ export function BurnupChart({ snapshots, scopeChanges = [], initialPoints, class
       return { change, point };
     }).filter((value): value is { change: ScopeChange; point: ChartPoint } => value !== null);
   }, [points, scopeChanges]);
-  const changeByLabel = useMemo(() => new Map(markers.map(({ change, point }) => [point.label, change])), [markers]);
+
+  const option = useMemo<EChartsOption>(() => {
+    const xData = points.map((point) => point.label);
+    const seriesLabels: Record<string, string> = {
+      scope: '范围',
+      completed: '已完成',
+      remaining: '剩余',
+      ideal: '理想进度',
+      idealRemaining: '理想剩余',
+    };
+
+    const changeSeries = {
+      name: '范围变更',
+      type: 'scatter' as const,
+      symbolSize: 12,
+      z: 10,
+      data: markers.map(({ change, point }) => ({
+        value: [point.label, mode === 'burnup' ? point.scope : point.remaining],
+        itemStyle: {
+          color: change.points_delta >= 0 ? REMAINING_RED : COMPLETED_GREEN,
+          borderColor: '#fff',
+          borderWidth: 2,
+        },
+        change,
+      })),
+      tooltip: { show: false },
+    };
+
+    const progressSeries = mode === 'burnup'
+      ? [
+          {
+            name: 'completed',
+            type: 'line' as const,
+            smooth: true,
+            showSymbol: false,
+            lineStyle: { width: 3, color: THEME_PURPLE },
+            itemStyle: { color: THEME_PURPLE },
+            areaStyle: { color: 'rgba(112, 86, 223, 0.18)' },
+            data: points.map((point) => point.completed),
+          },
+          {
+            name: 'scope',
+            type: 'line' as const,
+            step: 'end' as const,
+            showSymbol: false,
+            lineStyle: { width: 2.5, color: SCOPE_BLUE },
+            itemStyle: { color: SCOPE_BLUE },
+            data: points.map((point) => point.scope),
+          },
+          {
+            name: 'ideal',
+            type: 'line' as const,
+            smooth: true,
+            showSymbol: false,
+            lineStyle: { width: 1.5, color: IDEAL_GRAY, type: 'dashed' as const },
+            itemStyle: { color: IDEAL_GRAY },
+            data: points.map((point) => point.ideal),
+          },
+          changeSeries,
+        ]
+      : [
+          {
+            name: 'remaining',
+            type: 'line' as const,
+            smooth: true,
+            showSymbol: false,
+            lineStyle: { width: 3, color: THEME_PURPLE },
+            itemStyle: { color: THEME_PURPLE },
+            data: points.map((point) => point.remaining),
+          },
+          {
+            name: 'idealRemaining',
+            type: 'line' as const,
+            smooth: true,
+            showSymbol: false,
+            lineStyle: { width: 1.5, color: IDEAL_GRAY, type: 'dashed' as const },
+            itemStyle: { color: IDEAL_GRAY },
+            data: points.map((point) => point.idealRemaining),
+          },
+          changeSeries,
+        ];
+
+    return {
+      grid: { top: 12, right: 12, bottom: 0, left: 12, containLabel: true },
+      tooltip: {
+        trigger: 'axis',
+        backgroundColor: '#fff',
+        borderColor: '#edf0f4',
+        textStyle: { color: '#333', fontSize: 12 },
+        formatter: (params) => {
+          const items = Array.isArray(params) ? params : [params];
+          const dateLabel = items[0]?.axisValue;
+          let html = `<strong>${dateLabel ?? ''}</strong>`;
+          for (const item of items) {
+            if (item.seriesName === '范围变更') continue;
+            const name = seriesLabels[item.seriesName as string] ?? item.seriesName;
+            const value = typeof item.value === 'number' ? item.value : (Array.isArray(item.value) ? item.value[1] : '');
+            html += `<div><span style="color:${item.color}">●</span> ${name} <b>${value ?? 0} pt</b></div>`;
+          }
+          return html;
+        },
+      },
+      xAxis: {
+        type: 'category',
+        data: xData,
+        boundaryGap: false,
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: { color: '#8d96a5', fontSize: 11 },
+      },
+      yAxis: {
+        type: 'value',
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: { color: '#8d96a5', fontSize: 11 },
+        splitLine: { lineStyle: { color: '#edf0f4' } },
+        minInterval: 1,
+      },
+      series: progressSeries as EChartsOption['series'],
+    };
+  }, [points, mode, markers]);
+
+  const handleEvents = useMemo(() => ({
+    click: (params: { seriesName?: string; data?: { change?: ScopeChange } }) => {
+      if (params.seriesName === '范围变更' && params.data?.change) {
+        onSelectChange?.(params.data.change);
+      }
+    },
+    mouseover: (params: { seriesName?: string; data?: { change?: ScopeChange; value?: [string, number] }; event?: { offsetX: number; offsetY: number } }) => {
+      if (params.seriesName === '范围变更' && params.data?.change && params.event) {
+        setHovered({ change: params.data.change, x: params.event.offsetX, y: params.event.offsetY });
+      }
+    },
+    mouseout: (params: { seriesName?: string }) => {
+      if (params.seriesName === '范围变更') setHovered(null);
+    },
+  }), [onSelectChange]);
 
   if (!points.length) {
     return (
@@ -146,52 +256,12 @@ export function BurnupChart({ snapshots, scopeChanges = [], initialPoints, class
       </div>
 
       <div className="burnup-chart-canvas" ref={canvasRef}>
-        <ResponsiveContainer width="100%" height={300}>
-          <ComposedChart
-            data={points}
-            margin={{ top: 12, right: 12, bottom: 0, left: -18 }}
-            onMouseMove={(state, event) => {
-              const label = state?.activeLabel;
-              const change = label != null ? changeByLabel.get(String(label)) : undefined;
-              const rect = canvasRef.current?.getBoundingClientRect();
-              if (change && event && rect) {
-                setHovered({ change, x: event.clientX - rect.left, y: event.clientY - rect.top });
-              } else {
-                setHovered(null);
-              }
-            }}
-            onMouseLeave={() => setHovered(null)}
-          >
-            <defs><linearGradient id="burnup-completed-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#22c55e" stopOpacity={0.24} /><stop offset="100%" stopColor="#22c55e" stopOpacity={0} /></linearGradient></defs>
-            <CartesianGrid vertical={false} stroke="#edf0f4" />
-            <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: '#8d96a5', fontSize: 11 }} />
-            <YAxis axisLine={false} tickLine={false} tick={{ fill: '#8d96a5', fontSize: 11 }} allowDecimals={false} />
-            {!hovered && <Tooltip content={<ChartTooltip />} />}
-            {mode === 'burnup' ? <>
-              <Area type="monotone" dataKey="completed" stroke="none" fill="url(#burnup-completed-fill)" />
-              <Line type="monotone" dataKey="completed" name="已完成" stroke="#22c55e" strokeWidth={3} dot={false} />
-              <Line type="stepAfter" dataKey="scope" name="范围" stroke="#3b82f6" strokeWidth={2.5} dot={false} />
-              <Line type="monotone" dataKey="ideal" name="理想进度" stroke="#9ca3af" strokeDasharray="5 5" strokeWidth={1.5} dot={false} />
-            </> : <>
-              <Line type="monotone" dataKey="remaining" name="剩余" stroke="#ef4444" strokeWidth={3} dot={false} />
-              <Line type="monotone" dataKey="idealRemaining" name="理想剩余" stroke="#9ca3af" strokeDasharray="5 5" strokeWidth={1.5} dot={false} />
-            </>}
-            {markers.map(({ change, point }) => (
-              <ReferenceDot
-                key={change.id}
-                x={point.label}
-                y={mode === 'burnup' ? point.scope : point.remaining}
-                r={6}
-                fill={change.points_delta >= 0 ? '#ef4444' : '#22c55e'}
-                stroke="#fff"
-                strokeWidth={2}
-                style={{ cursor: 'pointer' }}
-                onClick={() => onSelectChange?.(change)}
-                aria-label={`查看范围变更：${change.description}`}
-              />
-            ))}
-          </ComposedChart>
-        </ResponsiveContainer>
+        <ReactECharts
+          option={option}
+          notMerge
+          style={{ height: 300, width: '100%' }}
+          onEvents={handleEvents}
+        />
         {hovered && (() => {
           const above = hovered.y > 130;
           return (

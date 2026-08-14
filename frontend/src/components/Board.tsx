@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { DragEvent, FormEvent } from 'react';
-import { MoreHorizontal, Plus, Search, X, Zap } from 'lucide-react';
-import type { StoryPoints, Task, TaskCreateInput, TaskStatus, TaskUpdateInput } from '../types';
+import { CloseOutlined, MoreOutlined, PlusOutlined, SearchOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import type { StoryPoints, Task, TaskCreateInput, TaskStatus, TaskUpdateInput } from '@/types';
 
 const STATUSES: Array<{ value: TaskStatus; label: string }> = [
   { value: 'todo', label: '待办' },
@@ -126,11 +126,11 @@ export function Board({
         <div><h2>迭代看板</h2><p>拖动任务卡片更新状态。</p></div>
         <div className="board-tools">
           <label className="search" aria-label="搜索任务">
-            <Search size={15} />
+            <SearchOutlined style={{ fontSize: 15 }} />
             <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索任务…" />
           </label>
           <button className="primary-btn" type="button" onClick={() => setShowCreate(true)} disabled={disabled || !onCreateTask}>
-            <Plus size={15} /> 新建任务
+            <PlusOutlined style={{ fontSize: 15 }} /> 新建任务
           </button>
         </div>
       </div>
@@ -139,7 +139,7 @@ export function Board({
           const columnTasks = filteredTasks.filter((task) => task.status === column.value);
           return (
             <div className="column" key={column.value}>
-              <div className="column-head"><div><b>{column.label}</b><span>{columnTasks.length}</span></div><button className="icon-btn" type="button" title="新建任务" onClick={() => setShowCreate(true)}><Plus size={16} /></button></div>
+              <div className="column-head"><div><b>{column.label}</b><span>{columnTasks.length}</span></div><button className="icon-btn" type="button" title="新建任务" onClick={() => setShowCreate(true)}><PlusOutlined style={{ fontSize: 16 }} /></button></div>
               <div className="task-list" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { const id = Number(event.dataTransfer.getData('task-id')); const task = tasks.find((item) => item.id === id); if (task) void moveTask(task, column.value); }}>
                 {columnTasks.map((task) => <TaskCard key={task.id} task={task} disabled={disabled} onClick={() => { onTaskClick?.(task); setSelected(task); }} onEdit={() => setSelected(task)} onRemove={onRemoveTask ? () => void onRemoveTask(task) : undefined} onDelete={onDeleteTask ? () => void onDeleteTask(task) : undefined} onDragStart={(event) => event.dataTransfer.setData('task-id', String(task.id))} />)}
               </div>
@@ -151,7 +151,7 @@ export function Board({
       {selected && onEditTask && (
         <div className="overlay" onClick={() => setSelected(null)}>
           <form className="drawer" onSubmit={saveSelected} onClick={(event) => event.stopPropagation()}>
-            <div className="drawer-head"><span>任务详情</span><button className="icon-btn" type="button" title="关闭" onClick={() => setSelected(null)}><X size={18} /></button></div>
+            <div className="drawer-head"><span>任务详情</span><button className="icon-btn" type="button" title="关闭" onClick={() => setSelected(null)}><CloseOutlined style={{ fontSize: 18 }} /></button></div>
             <div className="drawer-body"><div className="task-title-row"><span className={`priority p-${selected.priority}`}>{selected.priority}</span><h2>{selected.title}</h2></div>
               <div className="drawer-grid"><label>状态<select name="status" defaultValue={selected.status}>{STATUSES.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}</select></label><label>故事点<select name="story_points" defaultValue={selected.story_points}>{[1, 2, 3, 5, 8, 13].map((points) => <option key={points} value={points}>{points}</option>)}</select></label></div>
               <button className="primary-btn full" type="submit" disabled={saving}>{saving ? '保存中…' : '保存修改'}</button>
@@ -161,14 +161,14 @@ export function Board({
         </div>
       )}
 
-      {showCreate && onCreateTask && <div className="overlay" onClick={() => setShowCreate(false)}><div className="modal" onClick={(event) => event.stopPropagation()}><div className="drawer-head"><span>新建任务</span><button className="icon-btn" type="button" title="关闭" onClick={() => setShowCreate(false)}><X size={18} /></button></div><form onSubmit={submitCreate}><label>任务标题<input autoFocus required value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="需要完成什么？" /></label><div className="drawer-grid"><label>故事点<select value={draft.story_points} onChange={(event) => setDraft({ ...draft, story_points: Number(event.target.value) as StoryPoints })}>{[1, 2, 3, 5, 8, 13].map((points) => <option key={points} value={points}>{points}</option>)}</select></label><label>优先级<select value={draft.priority} onChange={(event) => setDraft({ ...draft, priority: event.target.value as Task['priority'] })}>{['P0', 'P1', 'P2', 'P3'].map((priority) => <option key={priority}>{priority}</option>)}</select></label></div><label>变更原因（选填）<textarea value={draft.reason} onChange={(event) => setDraft({ ...draft, reason: event.target.value })} /></label><button className="primary-btn full" type="submit" disabled={saving}>{saving ? '创建中…' : '创建任务'}</button></form></div></div>}
+      {showCreate && onCreateTask && <div className="overlay" onClick={() => setShowCreate(false)}><div className="modal" onClick={(event) => event.stopPropagation()}><div className="drawer-head"><span>新建任务</span><button className="icon-btn" type="button" title="关闭" onClick={() => setShowCreate(false)}><CloseOutlined style={{ fontSize: 18 }} /></button></div><form onSubmit={submitCreate}><label>任务标题<input autoFocus required value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="需要完成什么？" /></label><div className="drawer-grid"><label>故事点<select value={draft.story_points} onChange={(event) => setDraft({ ...draft, story_points: Number(event.target.value) as StoryPoints })}>{[1, 2, 3, 5, 8, 13].map((points) => <option key={points} value={points}>{points}</option>)}</select></label><label>优先级<select value={draft.priority} onChange={(event) => setDraft({ ...draft, priority: event.target.value as Task['priority'] })}>{['P0', 'P1', 'P2', 'P3'].map((priority) => <option key={priority}>{priority}</option>)}</select></label></div><label>变更原因（选填）<textarea value={draft.reason} onChange={(event) => setDraft({ ...draft, reason: event.target.value })} /></label><button className="primary-btn full" type="submit" disabled={saving}>{saving ? '创建中…' : '创建任务'}</button></form></div></div>}
     </section>
   );
 }
 
 function TaskCard({ task, disabled, onClick, onEdit, onRemove, onDelete, onDragStart }: { task: Task; disabled: boolean; onClick: () => void; onEdit: () => void; onRemove?: () => void; onDelete?: () => void; onDragStart: (event: DragEvent<HTMLDivElement>) => void }) {
   const [menu, setMenu] = useState(false);
-  return <div className="task-card" draggable={!disabled} onDragStart={onDragStart} onClick={onClick} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onClick(); }}><div className="task-top"><span className={`priority p-${task.priority}`}>{task.priority}</span><button className="task-menu-trigger" type="button" title="任务操作" onClick={(event) => { event.stopPropagation(); setMenu(!menu); }}><MoreHorizontal size={15} /></button>{menu && <div className="task-menu" onClick={(event) => event.stopPropagation()}><button type="button" onClick={() => { setMenu(false); onEdit(); }}>编辑</button><button type="button" disabled={!onRemove} title={!onRemove ? '当前任务无法移出' : undefined} onClick={() => { setMenu(false); onRemove?.(); }}>移出迭代</button><button type="button" className="danger-action" disabled={!onDelete} onClick={() => { setMenu(false); onDelete?.(); }}>删除</button></div>}</div><h3>{task.title}</h3><div className="task-bottom"><span className="points"><Zap size={12} />{task.story_points}</span><span className="tag">{task.assignee ?? '未分配'}</span></div></div>;
+  return <div className="task-card" draggable={!disabled} onDragStart={onDragStart} onClick={onClick} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onClick(); }}><div className="task-top"><span className={`priority p-${task.priority}`}>{task.priority}</span><button className="task-menu-trigger" type="button" title="任务操作" onClick={(event) => { event.stopPropagation(); setMenu(!menu); }}><MoreOutlined style={{ fontSize: 15 }} /></button>{menu && <div className="task-menu" onClick={(event) => event.stopPropagation()}><button type="button" onClick={() => { setMenu(false); onEdit(); }}>编辑</button><button type="button" disabled={!onRemove} title={!onRemove ? '当前任务无法移出' : undefined} onClick={() => { setMenu(false); onRemove?.(); }}>移出迭代</button><button type="button" className="danger-action" disabled={!onDelete} onClick={() => { setMenu(false); onDelete?.(); }}>删除</button></div>}</div><h3>{task.title}</h3><div className="task-bottom"><span className="points"><ThunderboltOutlined style={{ fontSize: 12 }} />{task.story_points}</span><span className="tag">{task.assignee ?? '未分配'}</span></div></div>;
 }
 
 export default Board;
