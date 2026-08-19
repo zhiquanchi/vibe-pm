@@ -1,0 +1,77 @@
+/* 新页面与共享组件样式。styles.css / stages.css 为压缩单行文件，新增样式统一写本文件。 */
+
+/* ---- 状态徽章补全色调（planning/completed 原先缺失，新增待验收） ---- */
+.status-pill.planning { background: #f0f1f5; color: #5b6472; }
+.status-pill.completed { background: #e7f6ec; color: #2e9e54; }
+.status-pill.pending-acceptance { background: #f1ebff; color: #7056df; }
+
+/* ---- 侧栏兼容视图折叠分组 ---- */
+.nav-group-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 14px 4px;
+  border: none;
+  background: none;
+  color: var(--muted, #8b94a3);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+.nav-group-label:hover { color: var(--ink, #1d2433); }
+.nav-group-label svg { transition: transform 0.15s ease; }
+.nav-group-label.expanded svg { transform: rotate(90deg); }
+.nav-group-items { display: flex; flex-direction: column; }
+.nav-group-items .nav-item { padding-left: 26px; }
+
+/* ---- 项目切换器 ---- */
+.project-switch {
+  position: relative;
+}
+.project-switch-current {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 10px;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+}
+.project-switch-current:hover { background: rgba(112, 86, 223, 0.06); }
+.project-switch-current b { display: block; font-size: 13px; color: var(--ink, #1d2433); }
+.project-switch-current small { font-size: 10px; color: var(--muted, #8b94a3); }
+.project-switch-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 10px;
+  right: 10px;
+  z-index: 30;
+  background: var(--panel, #fff);
+  border: 1px solid var(--border, #e8ebf0);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(29, 36, 51, 0.12);
+  padding: 6px;
+  max-height: 280px;
+  overflow: auto;
+}
+.project-switch-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--ink, #1d2433);
+  text-align: left;
+}
+.project-switch-option:hover { background: #f4f5f9; }
+.project-switch-option.current { background: #f1ebff; color: #7056df; font-weight: 600; }

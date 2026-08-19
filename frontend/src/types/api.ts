@@ -155,7 +155,11 @@ export interface MemberUpdateInput {
   role: 'owner' | 'member' | 'observer';
 }
 
-export type StageStatus = 'planned' | 'active' | 'blocked' | 'completed';
+// PRD-05 起阶段含「待验收」中间态
+export type StageStatus = 'planned' | 'active' | 'blocked' | 'pending_acceptance' | 'completed';
+
+/** 项目整体状态：由主阶段状态自动映射（PRD-06）。 */
+export type ProjectOverallStatus = 'planned' | 'active' | 'blocked' | 'pending_acceptance' | 'completed';
 
 export interface Stage {
   id: number;
