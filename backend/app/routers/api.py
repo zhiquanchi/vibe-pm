@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.identity import current_user_id
 from app.db.database import get_db, snapshot
-from app.db.models import ScopeChange, Sprint, SprintSnapshot, Task
+from app.db.models import Project, ProjectMember, ScopeChange, Sprint, SprintSnapshot, Task
 from app.schemas import ScopeChangeCreate, SprintCreate, TaskCreate, TaskUpdate
 from app.services.common import to_dict
 from loguru import logger
@@ -20,6 +20,18 @@ router = APIRouter(prefix="/api")
 def health():
     logger.info("[endpoint GET /api/health] health check")
     return {"status": "ok"}
+
+
+@router.get("/my-projects")
+def my_projects(user_id: str = Depends(current_user_id), session: Session = Depends(get_db)):
+    logger.info(f"[endpoint GET /api/my-projects] user_id={user_id}")
+    stmt = (
+        select(Project)
+        .join(ProjectMember, ProjectMember.project_id == Project.id)
+        .where(ProjectMember.user_id == user_id)
+        .order_by(Project.id)
+    )
+    return [to_dict(project) for project in session.scalars(stmt)]
 
 
 @router.get("/sprints")

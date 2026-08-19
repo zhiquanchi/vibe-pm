@@ -19,7 +19,7 @@ import {
   Users,
   Zap,
 } from 'lucide-react';
-import { getUserId } from '../api';
+import { apiClient, getUserId } from '../api';
 import type { Project } from '../types';
 
 type Notice = {
@@ -118,14 +118,7 @@ export function AppShell({
             vibe<span className="brand-accent">pm</span>
           </span>
         </div>
-        <div className="workspace-switch">
-          <div className="workspace-icon">V</div>
-          <div>
-            <b>{project?.name || 'Vibe PM'}</b>
-            <small>{project ? '项目工作区' : '全局工作区'}</small>
-          </div>
-          <ChevronDown size={15} />
-        </div>
+        <ProjectSwitcher current={project} />
         {project && base ? (
           <nav>
             {nav(base, '总览', <LayoutDashboard size={17} />, true)}
@@ -195,6 +188,73 @@ export function AppShell({
         />
       )}
       {drawer === 'user' && <UserMenu isOwner={isOwner} close={() => setDrawer(null)} />}
+    </div>
+  );
+}
+
+/** 项目切换器：列出当前用户可访问的项目并跳转。 */
+function ProjectSwitcher({ current }: { current: Project | null }) {
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [projects, setProjects] = useState<Project[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    apiClient
+      .listMyProjects()
+      .then((items) => {
+        if (!cancelled) setProjects(items);
+      })
+      .catch(() => {
+        if (!cancelled) setProjects([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [current?.id]);
+  return (
+    <div className="project-switch">
+      <button
+        className="project-switch-current workspace-switch"
+        onClick={() => setOpen((value) => !value)}
+      >
+        <div className="workspace-icon">V</div>
+        <div>
+          <b>{current?.name || 'Vibe PM'}</b>
+          <small>{current ? '项目工作区' : '全局工作区'}</small>
+        </div>
+        <ChevronDown size={15} />
+      </button>
+      {open && projects && (
+        <div className="project-switch-menu">
+          {projects.length ? (
+            projects.map((project) => (
+              <button
+                key={project.id}
+                className={`project-switch-option ${project.id === current?.id ? 'current' : ''}`}
+                onClick={() => {
+                  setOpen(false);
+                  navigate(`/projects/${project.id}`);
+                }}
+              >
+                {project.name}
+              </button>
+            ))
+          ) : (
+            <span className="project-switch-option" style={{ cursor: 'default', color: '#8b94a3' }}>
+              暂无可访问的项目
+            </span>
+          )}
+          <button
+            className="project-switch-option"
+            onClick={() => {
+              setOpen(false);
+              navigate('/projects/new');
+            }}
+          >
+            <Plus size={13} /> 新建项目
+          </button>
+        </div>
+      )}
     </div>
   );
 }

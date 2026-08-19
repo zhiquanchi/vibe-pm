@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.db.database import init_db
+from app.routers.api import router as api_router
 from app.routers.projects import router
 
 
@@ -14,7 +15,29 @@ def client(tmp_path, monkeypatch):
     init_db(seed=False)
     api = FastAPI()
     api.include_router(router)
+    api.include_router(api_router)
     return TestClient(api)
+
+
+def test_my_projects_returns_only_membership(client):
+    """GET /api/my-projects 仅返回当前用户为成员的项目。"""
+    mine = client.post(
+        "/api/projects",
+        headers={"X-User-Id": "switcher-owner"},
+        json={"name": "我的项目"},
+    ).json()
+    other = client.post(
+        "/api/projects",
+        headers={"X-User-Id": "someone-else"},
+        json={"name": "别人的项目"},
+    ).json()
+
+    response = client.get("/api/my-projects", headers={"X-User-Id": "switcher-owner"})
+    assert response.status_code == 200
+    projects = response.json()
+    assert [project["id"] for project in projects] == [mine["id"]]
+    assert other["id"] not in [project["id"] for project in projects]
+    assert projects[0]["name"] == "我的项目"
 
 
 def test_project_create_and_detail_membership(client):
