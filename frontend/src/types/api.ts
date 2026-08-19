@@ -228,6 +228,8 @@ export interface TaskUpdate {
   planned_date?: string | null;
   position?: number;
   reason?: string | null;
+  /** PRD-05：标记/取消验收必需 */
+  acceptance_required?: boolean;
 }
 
 export interface TaskMoveRequest {
@@ -246,6 +248,8 @@ export interface StageTask {
   assignee: string | null;
   planned_date: string | null;
   position: number;
+  /** PRD-05：是否为阶段验收必需项 */
+  acceptance_required?: boolean;
   created_at?: string;
   updated_at?: string;
   completed_at?: string | null;
@@ -316,4 +320,168 @@ export interface ConfirmBlockerInput {
   action: 'continue' | 'reblock';
   reason?: string;
   handler_id?: string;
+}
+
+// --- PRD-05: stage deliverables & acceptance ---
+
+export type DeliverableType = 'document' | 'code' | 'deployment' | 'other';
+export type DeliverableContentKind = 'text' | 'link' | 'file';
+export type AcceptanceStatus = 'pending' | 'approved' | 'rejected';
+
+export const deliverableTypeLabel: Record<DeliverableType, string> = {
+  document: '文档',
+  code: '代码',
+  deployment: '部署产物',
+  other: '其他',
+};
+
+export interface StageDeliverable {
+  id: number;
+  stage_id: number;
+  name: string;
+  type: DeliverableType;
+  content_kind: DeliverableContentKind;
+  text: string | null;
+  link: string | null;
+  file_name: string | null;
+  file_size: number | null;
+  file_url: string | null;
+  submitted_by: string;
+  submitted_at: string;
+  is_required: boolean;
+}
+
+export interface StageDeliverableCreateInput {
+  name: string;
+  type: DeliverableType;
+  content_kind: DeliverableContentKind;
+  text?: string | null;
+  link?: string | null;
+  file_name?: string | null;
+  file_url?: string | null;
+}
+
+export interface StageDeliverableUpdateInput {
+  name?: string;
+  type?: DeliverableType;
+  content_kind?: DeliverableContentKind;
+  text?: string | null;
+  link?: string | null;
+  file_name?: string | null;
+  file_url?: string | null;
+}
+
+/** 提交验收被阻止时的三类明细（PRD-05） */
+export interface AcceptanceBlockerDetail {
+  incomplete_required_tasks: Array<{ id: number; title: string }>;
+  missing_required_deliverables: Array<{ id: number; name: string }>;
+  unresolved_stage_blockers: Array<{ id: number; reason: string }>;
+}
+
+export interface StageAcceptance {
+  id: number;
+  stage_id: number;
+  status: AcceptanceStatus;
+  submitted_by: string;
+  submitted_at: string;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  note: string | null;
+  rejection_reason: string | null;
+  blockers?: AcceptanceBlockerDetail | null;
+}
+
+export interface StageAcceptanceReviewInput {
+  action: 'approve' | 'reject';
+  note?: string | null;
+  rejection_reason?: string | null;
+}
+
+// --- PRD-06: project overview / risks / activities ---
+
+export interface ProjectOverview {
+  project: Project;
+  overall_status: ProjectOverallStatus;
+  primary_stage: Stage | null;
+  parallel_stages: Stage[];
+  metrics: {
+    open_tasks: number;
+    blocked_tasks: number;
+    pending_acceptance_stages: number;
+  };
+}
+
+export type RiskKind = 'stage_blocker' | 'task_blocker' | 'overdue_stage' | 'overdue_task';
+
+export interface ProjectRisk {
+  kind: RiskKind;
+  severity: 'high' | 'medium';
+  title: string;
+  detail: string | null;
+  owner_name: string | null;
+  duration_days: number;
+  overdue_days: number | null;
+  stage_id: number | null;
+  task_id: number | null;
+  blocker_id: number | null;
+}
+
+export interface ProjectActivity {
+  id: number;
+  type: string;
+  description: string;
+  stage_id: number | null;
+  stage_name: string | null;
+  created_by: string;
+  created_by_name: string | null;
+  created_at: string;
+  target_deleted: boolean;
+}
+
+// --- PRD-07: AI project copilot ---
+
+/** AI 输出的最小单元：事实 / 推断 / 建议，可附带记录跳转链接 */
+export interface CopilotItem {
+  kind: 'fact' | 'inference' | 'suggestion';
+  text: string;
+  link_path: string | null;
+  link_label: string | null;
+}
+
+export interface CopilotSummary {
+  primary_stage: { name: string; status: StageStatus; owner_name: string | null } | null;
+  parallel_stages: Array<{ name: string; owner_name: string | null }>;
+  risks: CopilotItem[];
+  actions: Array<{ order: number; text: string; reason: string; link_path: string | null }>;
+  insufficient_data: boolean;
+}
+
+export interface CopilotStageAnalysis {
+  has_risk: boolean;
+  items: CopilotItem[];
+}
+
+export interface CopilotChatTurn {
+  role: 'user' | 'assistant';
+  content: string;
+  links: Array<{ label: string; path: string }> | null;
+}
+
+export type CopilotRange = '24h' | '7d' | '30d';
+
+export interface CopilotChanges {
+  completed: CopilotItem[];
+  unresolved: CopilotItem[];
+  new_risks: CopilotItem[];
+}
+
+export interface CopilotTaskAdvice {
+  task_id: number;
+  task_title: string;
+  reason: string;
+  project_id: number;
+  project_name: string;
+  stage_id: number | null;
+  stage_name: string | null;
+  link_path: string;
 }

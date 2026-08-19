@@ -32,6 +32,20 @@ import type {
   ProjectCreateInput,
   ProjectMember,
   ProjectUpdateInput,
+  StageDeliverable,
+  StageDeliverableCreateInput,
+  StageDeliverableUpdateInput,
+  StageAcceptance,
+  StageAcceptanceReviewInput,
+  ProjectOverview,
+  ProjectRisk,
+  ProjectActivity,
+  CopilotSummary,
+  CopilotStageAnalysis,
+  CopilotChatTurn,
+  CopilotRange,
+  CopilotChanges,
+  CopilotTaskAdvice,
 } from '../types';
 
 const env = import.meta.env as Record<string, string | undefined>;
@@ -199,6 +213,78 @@ export class ApiClient {
   }
   confirmBlocker(projectId: number, taskId: number, input: ConfirmBlockerInput) {
     return this.post<StageTask>(`/projects/${projectId}/tasks/${taskId}/confirm-blocker`, input);
+  }
+
+  // --- PRD-05: stage deliverables & acceptance (后端未就绪时接口报错由页面呈现错误态) ---
+
+  listStageDeliverables(projectId: number, stageId: number, signal?: AbortSignal) {
+    return this.get<StageDeliverable[]>(`/projects/${projectId}/stages/${stageId}/deliverables`, signal);
+  }
+  createStageDeliverable(projectId: number, stageId: number, input: StageDeliverableCreateInput) {
+    return this.post<StageDeliverable>(`/projects/${projectId}/stages/${stageId}/deliverables`, input);
+  }
+  updateStageDeliverable(projectId: number, stageId: number, deliverableId: number, input: StageDeliverableUpdateInput) {
+    return this.patch<StageDeliverable>(`/projects/${projectId}/stages/${stageId}/deliverables/${deliverableId}`, input);
+  }
+  deleteStageDeliverable(projectId: number, stageId: number, deliverableId: number) {
+    return this.delete<{ deleted: boolean }>(`/projects/${projectId}/stages/${stageId}/deliverables/${deliverableId}`);
+  }
+  markDeliverableRequired(projectId: number, stageId: number, deliverableId: number) {
+    return this.post<StageDeliverable>(`/projects/${projectId}/stages/${stageId}/deliverables/${deliverableId}/mark-required`, {});
+  }
+  unmarkDeliverableRequired(projectId: number, stageId: number, deliverableId: number) {
+    return this.delete<StageDeliverable>(`/projects/${projectId}/stages/${stageId}/deliverables/${deliverableId}/mark-required`);
+  }
+  listStageAcceptances(projectId: number, stageId: number, signal?: AbortSignal) {
+    return this.get<StageAcceptance[]>(`/projects/${projectId}/stages/${stageId}/acceptances`, signal);
+  }
+  submitStageAcceptance(projectId: number, stageId: number, note?: string | null) {
+    return this.post<StageAcceptance>(`/projects/${projectId}/stages/${stageId}/acceptances`, note ? { note } : {});
+  }
+  reviewStageAcceptance(projectId: number, stageId: number, acceptanceId: number, input: StageAcceptanceReviewInput) {
+    return this.patch<StageAcceptance>(`/projects/${projectId}/stages/${stageId}/acceptances/${acceptanceId}`, input);
+  }
+  reopenStage(projectId: number, stageId: number, reason: string) {
+    return this.post<Stage>(`/projects/${projectId}/stages/${stageId}/reopen`, { reason });
+  }
+
+  // --- PRD-06: project overview / risks / activities ---
+
+  getProjectOverview(projectId: number, signal?: AbortSignal) {
+    return this.get<ProjectOverview>(`/projects/${projectId}/overview`, signal);
+  }
+  listProjectRisks(projectId: number, signal?: AbortSignal) {
+    return this.get<ProjectRisk[]>(`/projects/${projectId}/risks`, signal);
+  }
+  listProjectActivities(projectId: number, params: { stage_id?: number; type?: string; created_by?: string } = {}, signal?: AbortSignal) {
+    const query = new URLSearchParams();
+    if (params.stage_id != null) query.set('stage_id', String(params.stage_id));
+    if (params.type) query.set('type', params.type);
+    if (params.created_by) query.set('created_by', params.created_by);
+    const qs = query.toString();
+    return this.get<ProjectActivity[]>(`/projects/${projectId}/activities${qs ? `?${qs}` : ''}`, signal);
+  }
+  /** 项目切换器：当前用户可访问的项目列表 */
+  listMyProjects(signal?: AbortSignal) {
+    return this.get<Project[]>('/my-projects', signal);
+  }
+
+  // --- PRD-07: AI project copilot ---
+
+  copilotSummary(projectId: number) {
+    return this.post<CopilotSummary>(`/projects/${projectId}/copilot/summary`, {});
+  }
+  copilotStageAnalysis(projectId: number, stageId: number) {
+    return this.post<CopilotStageAnalysis>(`/projects/${projectId}/stages/${stageId}/copilot/analysis`, {});
+  }
+  copilotChat(projectId: number, question: string, history: CopilotChatTurn[] = []) {
+    return this.post<CopilotChatTurn>(`/projects/${projectId}/copilot/chat`, { question, history });
+  }
+  copilotChanges(projectId: number, range: CopilotRange) {
+    return this.get<CopilotChanges>(`/projects/${projectId}/copilot/changes?range=${range}`);
+  }
+  myTaskAdvice(signal?: AbortSignal) {
+    return this.get<CopilotTaskAdvice[]>('/my-tasks/copilot/advice', signal);
   }
 }
 
