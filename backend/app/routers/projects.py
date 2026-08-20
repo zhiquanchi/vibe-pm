@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
@@ -86,6 +86,44 @@ def project_detail(project_id: int, _user_id: str = Depends(require_project_memb
     project = _project_or_404(session, project_id)
     members = _member_rows(session, project_id, (ProjectMember.role, Profile.name))
     return {"project": to_dict(project), "members": members}
+
+
+@router.get("/{project_id}/overview")
+def project_overview(project_id: int, _user_id: str = Depends(require_project_member), session: Session = Depends(get_db)):
+    logger.info(f"[endpoint GET /api/projects/{project_id}/overview] user_id={_user_id}")
+    return project_service.get_project_overview(session, project_id)
+
+
+@router.get("/{project_id}/risks")
+def project_risks(project_id: int, _user_id: str = Depends(require_project_member), session: Session = Depends(get_db)):
+    logger.info(f"[endpoint GET /api/projects/{project_id}/risks] user_id={_user_id}")
+    return project_service.list_project_risks(session, project_id)
+
+
+@router.get("/{project_id}/activities")
+def project_activities(
+    project_id: int,
+    stage_id: int | None = Query(default=None),
+    type: str | None = Query(default=None),
+    created_by: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    _user_id: str = Depends(require_project_member),
+    session: Session = Depends(get_db),
+):
+    logger.info(
+        f"[endpoint GET /api/projects/{project_id}/activities] user_id={_user_id} "
+        f"stage_id={stage_id} type={type!r} created_by={created_by!r}"
+    )
+    return project_service.list_activities(
+        session,
+        project_id,
+        stage_id=stage_id,
+        type=type,
+        created_by=created_by,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/{project_id}/members")
