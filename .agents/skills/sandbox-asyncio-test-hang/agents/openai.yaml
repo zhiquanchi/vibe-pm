@@ -1,0 +1,4 @@
+interface:
+  display_name: "沙箱 asyncio 测试挂起修复"
+  short_description: "修复受限容器中 pytest/TestClient 挂起与环境问题"
+  default_prompt: "使用 $sandbox-asyncio-test-hang 诊断并修复受限容器里 pytest/TestClient 挂起的问题。"
