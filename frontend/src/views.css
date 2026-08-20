@@ -296,3 +296,199 @@ a.activity-row:hover { background: #f7f6ff; }
 }
 .acceptance-blocked ul { margin: 4px 0 0 18px; padding: 0; }
 .acceptance-blocked li { font-size: 12px; margin: 2px 0; }
+
+/* ---- AI 副驾驶（PRD-07） ---- */
+.copilot-section-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.copilot-block h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  margin: 0 0 8px;
+  color: var(--ink, #1d2433);
+}
+.copilot-primary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+}
+.copilot-primary b { font-size: 15px; }
+.copilot-primary small,
+.copilot-parallel small { color: #8b94a3; font-size: 12px; }
+.copilot-stage-status {
+  font-size: 11px;
+  border-radius: 999px;
+  padding: 2px 10px;
+  background: #f0f1f5;
+  color: #5b6472;
+}
+.copilot-stage-status.blocked { background: #fee2e2; color: #dc2626; }
+.copilot-stage-status.pending_acceptance { background: #f1ebff; color: #7056df; }
+.copilot-stage-status.completed { background: #e7f6ec; color: #2e9e54; }
+.copilot-parallel {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0;
+}
+.copilot-parallel b { font-size: 13px; }
+.copilot-item-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.copilot-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border, #e8ebf0);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+.copilot-kind {
+  flex: none;
+  font-size: 11px;
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.copilot-kind.fact { background: #e8f0fe; color: #1d4ed8; }
+.copilot-kind.inference { background: #fef3c7; color: #b45309; }
+.copilot-kind.suggestion { background: #f1ebff; color: #7056df; }
+.copilot-item-text { flex: 1; min-width: 0; word-break: break-word; }
+.copilot-item-link { flex: none; font-size: 12px; }
+.copilot-actions {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.copilot-actions li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+.copilot-actions li small { color: #8b94a3; font-size: 12px; }
+.copilot-actions li .link { align-self: flex-start; font-size: 12px; }
+
+/* 问答 */
+.copilot-chat {
+  display: flex;
+  flex-direction: column;
+  min-height: 480px;
+}
+.chat-scroll {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px 2px 18px;
+}
+.chat-turn {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.chat-turn.user { flex-direction: row-reverse; }
+.chat-avatar {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: #f1ebff;
+  color: #7056df;
+  font-size: 12px;
+  font-weight: 700;
+}
+.chat-turn.user .chat-avatar { background: #eef2f7; color: #5b6472; }
+.chat-bubble {
+  max-width: 78%;
+  background: #f6f7fa;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.chat-turn.user .chat-bubble { background: #f1ebff; }
+.chat-bubble p { margin: 0; white-space: pre-wrap; word-break: break-word; }
+.chat-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.chat-links .link { font-size: 12px; }
+.chat-input {
+  display: flex;
+  gap: 8px;
+  border-top: 1px solid var(--border, #e8ebf0);
+  padding-top: 12px;
+}
+.chat-input input {
+  flex: 1;
+  border: 1px solid var(--border, #e8ebf0);
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13px;
+}
+
+/* 近期变化 */
+.range-switch {
+  display: flex;
+  gap: 4px;
+  border: 1px solid var(--border, #e8ebf0);
+  border-radius: 8px;
+  padding: 3px;
+}
+.range-switch button {
+  border: none;
+  background: none;
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  color: #8b94a3;
+  cursor: pointer;
+}
+.range-switch button.active {
+  background: #f1ebff;
+  color: #7056df;
+  font-weight: 600;
+}
+
+/* 我的任务：个人行动建议 */
+.advice-card { margin-bottom: 14px; }
+.advice-card h2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+}
+.advice-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.advice-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--border, #e8ebf0);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.advice-list b { font-size: 13px; }
+.advice-list small { color: #8b94a3; font-size: 12px; margin-left: 8px; }
+.advice-list p { margin: 3px 0 0; font-size: 12px; color: #5b6472; }
+.advice-list .link { flex: none; font-size: 12px; }

@@ -1,16 +1,17 @@
 import { useEffect, useState } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, Sparkles } from 'lucide-react';
 import { apiClient } from '../api';
 import { errorText, formatDate } from '../lib/format';
 import { stageTaskPriorityLabel, stageTaskStatusLabel } from '../lib/labels';
 import { PageHeader } from '../components/shared/PageHeader';
 import { EmptyState, ErrorState, LoadingState } from '../components/shared/States';
 import { PriorityBadge, StatusBadge } from '../components/shared/StatusBadge';
-import type { MyTask, StageTaskPriority, StageTaskStatus } from '../types';
+import type { CopilotTaskAdvice, MyTask, StageTaskPriority, StageTaskStatus } from '../types';
 
 /** 我的任务页（全局，跨项目）：/my-tasks */
 export function MyTasksView() {
   const [tasks, setTasks] = useState<MyTask[]>([]);
+  const [advice, setAdvice] = useState<CopilotTaskAdvice[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<{
@@ -43,6 +44,12 @@ export function MyTasksView() {
   useEffect(() => {
     void load();
   }, [filters]);
+  useEffect(() => {
+    apiClient
+      .myTaskAdvice()
+      .then(setAdvice)
+      .catch(() => setAdvice([]));
+  }, []);
   const projects = [
     ...new Map(
       tasks.map((task) => [
@@ -73,6 +80,35 @@ export function MyTasksView() {
           </button>
         }
       />
+      {advice && advice.length > 0 && (
+        <section className="panel advice-card">
+          <div className="panel-head">
+            <div>
+              <h2>
+                <Sparkles size={15} /> 个人行动建议
+              </h2>
+              <p>{'按 受阻 > 逾期 > 主阶段 > 依赖 > 临近验收 排序。'}</p>
+            </div>
+          </div>
+          <ol className="advice-list">
+            {advice.map((item) => (
+              <li key={`${item.project_id}-${item.task_id}`}>
+                <div>
+                  <b>{item.task_title}</b>
+                  <small>
+                    {item.project_name}
+                    {item.stage_name ? ` · ${item.stage_name}` : ''}
+                  </small>
+                  <p>{item.reason}</p>
+                </div>
+                <a className="link" href={item.link_path}>
+                  查看 →
+                </a>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
       <section className="panel stage-workbench">
         <div className="toolbar">
           <select

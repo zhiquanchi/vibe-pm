@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Milestone, Plus, ShieldAlert } from 'lucide-react';
+import { ArrowRight, Bot, FileText, Milestone, Plus, ShieldAlert } from 'lucide-react';
 import { apiClient } from '../api';
 import { useProjectMeta } from '../context';
 import { errorText } from '../lib/format';
@@ -75,7 +75,23 @@ export function OverviewView() {
         eyebrow="PROJECT OVERVIEW"
         title={overview.project.name}
         copy={overview.project.description || '以主阶段为核心的项目健康度总览。'}
-        actions={<StatusBadge kind="project" status={overview.overall_status} dot />}
+        actions={
+          <>
+            <StatusBadge kind="project" status={overview.overall_status} dot />
+            <button
+              className="ghost-btn"
+              onClick={() => navigate(`/projects/${projectId}/copilot?tab=chat`)}
+            >
+              <Bot size={15} /> 询问 AI
+            </button>
+            <button
+              className="ghost-btn"
+              onClick={() => navigate(`/projects/${projectId}/copilot`)}
+            >
+              <FileText size={15} /> 项目摘要
+            </button>
+          </>
+        }
       />
       {stages.length === 0 ? (
         <EmptyState

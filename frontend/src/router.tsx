@@ -8,6 +8,7 @@ import { MembersView } from './views/MembersView';
 import { SettingsView } from './views/SettingsView';
 import { ProjectCreateView } from './views/ProjectCreateView';
 import { MyTasksView } from './views/MyTasksView';
+import { CopilotView } from './views/CopilotView';
 import { NotFound } from './views/ErrorPages';
 import { SprintListView } from './views/legacy/SprintListView';
 import { SprintWorkspaceView } from './views/legacy/SprintWorkspaceView';
@@ -32,6 +33,7 @@ export const router = createBrowserRouter([
       { path: 'stages', element: <StagesView /> },
       { path: 'stages/:stageId', element: <StageWorkbenchView /> },
       { path: 'activity', element: <ActivityView /> },
+      { path: 'copilot', element: <CopilotView /> },
       { path: 'members', element: <MembersView /> },
       { path: 'settings', element: <SettingsView /> },
       // 兼容视图（Sprint 模型）

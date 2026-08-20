@@ -12,6 +12,7 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
+  Sparkles,
   Star,
   Trash2,
   XCircle,
@@ -28,6 +29,7 @@ import { Modal } from '../components/shared/Modal';
 import { PageHeader } from '../components/shared/PageHeader';
 import { EmptyState, ErrorState, LoadingState } from '../components/shared/States';
 import { PriorityBadge, StatusBadge } from '../components/shared/StatusBadge';
+import { StageRiskAnalysisModal } from './CopilotView';
 import type {
   AcceptanceBlockerDetail,
   DeliverableContentKind,
@@ -98,6 +100,7 @@ export function StageWorkbenchView() {
   >(null);
   const [deliverableModal, setDeliverableModal] = useState<DeliverableModal>(null);
   const [acceptanceModal, setAcceptanceModal] = useState<AcceptanceModal>(null);
+  const [riskModalOpen, setRiskModalOpen] = useState(false);
   const [blockedDetail, setBlockedDetail] = useState<AcceptanceBlockerDetail | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -507,6 +510,9 @@ export function StageWorkbenchView() {
                 <Check size={15} /> 解除阶段阻塞
               </button>
             )}
+            <button className="ghost-btn" onClick={() => setRiskModalOpen(true)}>
+              <Sparkles size={15} /> 风险分析
+            </button>
             {writable && (
               <button className="primary-btn" onClick={() => setModal({ kind: 'create' })}>
                 <Plus size={15} /> 新建任务
@@ -857,6 +863,13 @@ export function StageWorkbenchView() {
           saving={saving}
           onClose={() => setAcceptanceModal(null)}
           onSubmit={reopenStage}
+        />
+      )}
+      {riskModalOpen && stageId != null && (
+        <StageRiskAnalysisModal
+          projectId={routeProjectId}
+          stageId={stageId}
+          onClose={() => setRiskModalOpen(false)}
         />
       )}
     </>
