@@ -40,8 +40,8 @@ class ProjectMember(Base):
 class Stage(Base):
     __tablename__ = "stages"
     __table_args__ = (
-        # PRD-04: stages may be 'blocked' (阻塞).
-        CheckConstraint("status IN ('planned','active','completed','blocked')"),
+        # PRD-04: stages may be 'blocked' (阻塞); PRD-05 adds 'pending_acceptance' (待验收).
+        CheckConstraint("status IN ('planned','active','completed','blocked','pending_acceptance')"),
         # At most one primary stage per project, enforced at the database level.
         Index("uq_stages_primary", "project_id", unique=True, sqlite_where=text("is_primary = 1")),
         Index("idx_stages_project", "project_id", "position"),
@@ -105,6 +105,8 @@ class Task(Base):
     story_points: Mapped[float] = mapped_column(Float, nullable=False, default=1)
     priority: Mapped[str] = mapped_column(String, nullable=False, default="P2")
     assignee: Mapped[str | None] = mapped_column(String)
+    # PRD-05: this task must be done before stage acceptance can be submitted.
+    acceptance_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # PRD-03: planned date for the task (计划日期).
     planned_date: Mapped[str | None] = mapped_column(String)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -190,3 +192,53 @@ class StageBlocker(Base):
     resolved_at: Mapped[str | None] = mapped_column(String)
     resolution: Mapped[str | None] = mapped_column(String)
     previous_stage_status: Mapped[str | None] = mapped_column(String)
+
+
+class StageDeliverable(Base):
+    """A deliverable submitted for a stage (PRD-05).
+
+    The first version records links or externally stored file addresses; it does
+    not accept multipart uploads. ``file_path`` is the persisted field while
+    ``file_url`` is a response compatibility alias in the service layer.
+    """
+
+    __tablename__ = "stage_deliverables"
+    __table_args__ = (
+        CheckConstraint("type IN ('document','code','deployment','other')"),
+        CheckConstraint("content_kind IN ('text','link','file')"),
+        Index("idx_stage_deliverables_stage", "stage_id", "is_required"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    stage_id: Mapped[int] = mapped_column(ForeignKey("stages.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    type: Mapped[str] = mapped_column(String, nullable=False)
+    content_kind: Mapped[str] = mapped_column(String, nullable=False, default="link")
+    text: Mapped[str | None] = mapped_column(Text)
+    link: Mapped[str | None] = mapped_column(String)
+    file_path: Mapped[str | None] = mapped_column(Text)
+    file_name: Mapped[str | None] = mapped_column(String)
+    file_size: Mapped[int | None] = mapped_column(Integer)
+    submitted_by: Mapped[str | None] = mapped_column(ForeignKey("profiles.id"))
+    submitted_at: Mapped[str | None] = mapped_column(String)
+    is_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class StageAcceptance(Base):
+    """One stage acceptance submission and its review result (PRD-05)."""
+
+    __tablename__ = "stage_acceptances"
+    __table_args__ = (
+        CheckConstraint("status IN ('pending','approved','rejected')"),
+        Index("idx_stage_acceptances_stage", "stage_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    stage_id: Mapped[int] = mapped_column(ForeignKey("stages.id", ondelete="CASCADE"), nullable=False)
+    submitted_by: Mapped[str] = mapped_column(ForeignKey("profiles.id"), nullable=False)
+    submitted_at: Mapped[str] = mapped_column(String, nullable=False)
+    handled_by: Mapped[str | None] = mapped_column(ForeignKey("profiles.id"))
+    handled_at: Mapped[str | None] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    notes: Mapped[str | None] = mapped_column(Text)
+    rejection_reason: Mapped[str | None] = mapped_column(Text)

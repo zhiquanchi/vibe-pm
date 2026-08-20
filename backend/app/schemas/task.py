@@ -64,7 +64,9 @@ class TaskResponse(BaseModel):
 class TaskCreate(BaseModel):
     """Create a task inside a stage (PRD-03)."""
 
-    project_id: int
+    # project_id is provided by the route path; kept optional so clients that
+    # target /projects/{id}/stages/{sid}/tasks do not need to repeat it.
+    project_id: int | None = None
     stage_id: int | None = None
     title: str = Field(min_length=1)
     description: str | None = None
@@ -85,6 +87,7 @@ class TaskUpdate(BaseModel):
     assignee: str | None = None
     planned_date: date | None = None
     position: int | None = Field(default=None, ge=0)
+    acceptance_required: bool | None = None
     reason: str | None = None
     created_by: str = "current-user"
 

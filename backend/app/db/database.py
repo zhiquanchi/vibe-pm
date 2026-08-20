@@ -171,6 +171,12 @@ def _apply_legacy_column_patches(session: Session) -> None:
             "ALTER TABLE tasks ADD COLUMN planned_date TEXT",
             lambda: session.execute(text("ALTER TABLE tasks ADD COLUMN planned_date TEXT")),
         )
+    if "acceptance_required" not in task_columns:
+        _apply_migration(
+            "add tasks.acceptance_required",
+            "ALTER TABLE tasks ADD COLUMN acceptance_required BOOLEAN NOT NULL DEFAULT 0",
+            lambda: session.execute(text("ALTER TABLE tasks ADD COLUMN acceptance_required BOOLEAN NOT NULL DEFAULT 0")),
+        )
     project_columns = {row[1] for row in session.execute(text("PRAGMA table_info(projects)"))}
     if "default_sprint_weeks" not in project_columns:
         _apply_migration(

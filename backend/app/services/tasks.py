@@ -63,8 +63,9 @@ def _require_writer(session: Session, project_id: int, user_id: str) -> None:
 
 
 def _require_stage_writable(session: Session, stage: Stage | None) -> None:
-    if stage is not None and stage.status == "completed":
-        raise HTTPException(status_code=409, detail="已完成阶段为只读状态")
+    if stage is not None and stage.status in ("completed", "pending_acceptance"):
+        detail = "已完成阶段为只读" if stage.status == "completed" else "待验收阶段为只读"
+        raise HTTPException(status_code=409, detail=detail)
 
 
 def _next_position(session: Session, stage_id: int | None) -> int:
@@ -85,6 +86,12 @@ def _validate_transition(old: str, new: str) -> None:
     if new not in allowed:
         labels = "、".join(STATUS_LABELS.get(s, s) for s in allowed) or "无"
         raise HTTPException(status_code=422, detail=f"任务状态转换不合法，{STATUS_LABELS.get(old, old)}只能转为{labels}")
+
+
+def _require_project_owner(session: Session, project_id: int, user_id: str) -> None:
+    member = session.get(ProjectMember, (project_id, user_id))
+    if member is None or member.role != "owner":
+        raise HTTPException(status_code=403, detail="只有项目负责人可以配置阶段验收条件")
 
 
 def create_stage_task(session: Session, project_id: int, stage_id: int | None, payload, user_id: str) -> dict:
@@ -133,6 +140,11 @@ def update_stage_task(session: Session, project_id: int, task_id: int, payload, 
     data.pop("reason", None)
     old_status = task.status
     new_status = data.get("status")
+    acceptance_required = data.get("acceptance_required")
+    if acceptance_required is not None:
+        _require_project_owner(session, project_id, user_id)
+        if task.stage_id is None:
+            raise HTTPException(status_code=422, detail="验收必需任务必须属于一个阶段")
 
     if new_status is not None and new_status != old_status:
         _validate_transition(old_status, new_status)
@@ -146,6 +158,9 @@ def update_stage_task(session: Session, project_id: int, task_id: int, payload, 
     if "planned_date" in data:
         task.planned_date = data["planned_date"].isoformat() if data["planned_date"] else None
         changed_fields.append("planned_date")
+    old_acceptance_required = task.acceptance_required
+    if acceptance_required is not None:
+        task.acceptance_required = acceptance_required
     if new_status is not None and new_status != old_status:
         task.status = new_status
         task.completed_at = now if new_status == "done" else None
@@ -161,6 +176,14 @@ def update_stage_task(session: Session, project_id: int, task_id: int, payload, 
         )
     if changed_fields:
         _activity(session, project_id, "task_updated", f"更新任务「{task.title}」", user_id)
+    if acceptance_required is not None and acceptance_required != old_acceptance_required:
+        _activity(
+            session,
+            project_id,
+            "task_acceptance_required" if acceptance_required else "task_acceptance_optional",
+            f"任务「{task.title}」{'设为' if acceptance_required else '取消'}阶段验收必需",
+            user_id,
+        )
     try:
         session.commit()
     except Exception:

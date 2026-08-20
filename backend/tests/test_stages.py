@@ -6,12 +6,16 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.db.database import get_session, init_db
-from app.db.models import ProjectActivity
+from app.db.models import ProjectActivity, Stage, StageBlocker
 from app.routers.projects import router as projects_router
 from app.routers.stages import router as stages_router
+from app.routers.tasks import router as tasks_router
 from app.services.stages import DEFAULT_STAGE_TEMPLATE
 
 OWNER = {"X-User-Id": "stage-owner"}
+OWNER2 = {"X-User-Id": "stage-owner-2"}
+MEMBER = {"X-User-Id": "stage-member"}
+OBSERVER = {"X-User-Id": "stage-observer"}
 
 
 @pytest.fixture
@@ -21,11 +25,18 @@ def client(tmp_path, monkeypatch):
     api = FastAPI()
     api.include_router(projects_router)
     api.include_router(stages_router)
+    api.include_router(tasks_router)
     return TestClient(api)
 
 
 def create_project(client, stages=None, headers=OWNER):
-    payload = {"name": "阶段测试项目"}
+    payload = {
+        "name": "阶段测试项目",
+        "members": [
+            {"user_id": "stage-owner", "name": "负责人一", "email": "stage-owner@test.local", "role": "owner"},
+            {"user_id": "stage-owner-2", "name": "负责人二", "email": "stage-owner-2@test.local", "role": "owner"},
+        ],
+    }
     if stages is not None:
         payload["stages"] = stages
     response = client.post("/api/projects", json=payload, headers=headers)
@@ -44,6 +55,61 @@ def activity_types(project_id):
     rows = session.scalars(select(ProjectActivity.type).where(ProjectActivity.project_id == project_id).order_by(ProjectActivity.id)).all()
     session.close()
     return rows
+
+
+def seed_worker_roles(client, project_id):
+    for user_id, name, role in (
+        ("stage-member", "阶段负责人", "member"),
+        ("stage-observer", "观察者", "observer"),
+    ):
+        response = client.post(
+            f"/api/projects/{project_id}/members",
+            json={"user_id": user_id, "name": name, "email": f"{user_id}@test.local", "role": role},
+            headers=OWNER,
+        )
+        assert response.status_code == 200
+
+
+def prepare_acceptance_stage(client, *, with_task=True, task_done=True, deliverable_content=True):
+    project_id = create_project(client, stages=[{"name": "开发", "owner_id": "stage-member"}])
+    stage_id = list_stages(client, project_id)[0]["id"]
+    seed_worker_roles(client, project_id)
+    if with_task:
+        task = client.post(
+            f"/api/projects/{project_id}/stages/{stage_id}/tasks",
+            json={"title": "验收任务", "assignee": "stage-member"},
+            headers=OWNER,
+        ).json()
+        marked = client.patch(
+            f"/api/projects/{project_id}/tasks/{task['id']}",
+            json={"acceptance_required": True},
+            headers=OWNER,
+        )
+        assert marked.status_code == 200
+        assert marked.json()["acceptance_required"] is True
+        if task_done:
+            assert client.patch(f"/api/projects/{project_id}/tasks/{task['id']}", json={"status": "in_progress"}, headers=MEMBER).status_code == 200
+            assert client.patch(f"/api/projects/{project_id}/tasks/{task['id']}", json={"status": "done"}, headers=MEMBER).status_code == 200
+    deliverable_payload = {
+        "name": "部署说明",
+        "type": "document",
+        "content_kind": "link" if deliverable_content else "file",
+    }
+    if deliverable_content:
+        deliverable_payload["link"] = "https://example.com/deploy"
+    deliverable = client.post(
+        f"/api/projects/{project_id}/stages/{stage_id}/deliverables",
+        json=deliverable_payload,
+        headers=MEMBER,
+    ).json()
+    marked = client.post(
+        f"/api/projects/{project_id}/stages/{stage_id}/deliverables/{deliverable['id']}/mark-required",
+        headers=OWNER,
+    )
+    assert marked.status_code == 200
+    assert marked.json()["is_required"] is True
+    assert client.post(f"/api/projects/{project_id}/stages/{stage_id}/start", json={}, headers=OWNER).status_code == 200
+    return project_id, stage_id
 
 
 # --- 4.1 模板化创建（spec 场景 1.x） ---
@@ -379,3 +445,206 @@ def test_only_project_owner_can_assign_stage_owner(client):
         headers={"X-User-Id": "regular-member"},
     )
     assert response.status_code == 403
+
+
+# --- PRD-05: stage deliverables & acceptance ---
+
+
+def test_deliverable_crud_member_and_observer_permissions(client):
+    project_id, stage_id = prepare_acceptance_stage(client, with_task=False, deliverable_content=True)
+
+    observer_create = client.post(
+        f"/api/projects/{project_id}/stages/{stage_id}/deliverables",
+        json={"name": "观察者产物", "type": "other", "content_kind": "link", "link": "https://example.com/no"},
+        headers=OBSERVER,
+    )
+    assert observer_create.status_code == 403
+
+    created = client.post(
+        f"/api/projects/{project_id}/stages/{stage_id}/deliverables",
+        json={"name": "接口文档", "type": "document", "content_kind": "link", "link": "https://example.com/api"},
+        headers=MEMBER,
+    )
+    assert created.status_code == 201
+    body = created.json()
+    assert body["submitted_by"] == "stage-member"
+    assert body["submitted_at"]
+    assert body["is_required"] is False
+
+    updated = client.patch(
+        f"/api/projects/{project_id}/stages/{stage_id}/deliverables/{body['id']}",
+        json={"name": "接口文档 v2", "type": "code", "content_kind": "file", "link": None, "file_path": "/share/api.md", "file_name": "api.md"},
+        headers=OWNER2,
+    )
+    assert updated.status_code == 200
+    assert updated.json()["name"] == "接口文档 v2"
+    assert updated.json()["file_path"] == "/share/api.md"
+    assert updated.json()["file_url"] == "/share/api.md"
+    assert updated.json()["submitted_by"] == "stage-owner-2"
+
+    listed = client.get(f"/api/projects/{project_id}/stages/{stage_id}/deliverables", headers=OBSERVER)
+    assert listed.status_code == 200
+    assert [item["name"] for item in listed.json()] == ["接口文档 v2", "部署说明"]
+
+    deleted = client.delete(f"/api/projects/{project_id}/stages/{stage_id}/deliverables/{body['id']}", headers=MEMBER)
+    assert deleted.status_code == 200
+    assert deleted.json() == {"deleted": True}
+    activities = set(activity_types(project_id))
+    assert {"stage_deliverable_added", "stage_deliverable_updated", "stage_deliverable_removed"} <= activities
+
+
+def test_deliverable_required_flag_permissions_and_completed_read_only(client):
+    project_id, stage_id = prepare_acceptance_stage(client, with_task=False, deliverable_content=True)
+    deliverables = client.get(f"/api/projects/{project_id}/stages/{stage_id}/deliverables", headers=OWNER).json()
+    deliverable_id = deliverables[0]["id"]
+
+    forbidden = client.post(
+        f"/api/projects/{project_id}/stages/{stage_id}/deliverables/{deliverable_id}/mark-required",
+        headers=MEMBER,
+    )
+    assert forbidden.status_code == 403
+
+    unrequired = client.delete(
+        f"/api/projects/{project_id}/stages/{stage_id}/deliverables/{deliverable_id}/mark-required",
+        headers=OWNER2,
+    )
+    assert unrequired.status_code == 200
+    assert unrequired.json()["is_required"] is False
+    assert "stage_deliverable_optional" in activity_types(project_id)
+
+    required = client.post(
+        f"/api/projects/{project_id}/stages/{stage_id}/deliverables/{deliverable_id}/mark-required",
+        headers=OWNER,
+    )
+    assert required.status_code == 200
+    assert required.json()["is_required"] is True
+    assert "stage_deliverable_required" in activity_types(project_id)
+
+    assert client.post(f"/api/projects/{project_id}/stages/{stage_id}/complete", json={}, headers=OWNER).status_code == 200
+    read_only = client.patch(
+        f"/api/projects/{project_id}/stages/{stage_id}/deliverables/{deliverable_id}",
+        json={"name": "不能修改"},
+        headers=OWNER,
+    )
+    assert read_only.status_code == 409
+    assert read_only.json()["detail"] == "已完成阶段为只读"
+
+
+def test_submit_acceptance_lists_all_unmet_conditions(client):
+    project_id, stage_id = prepare_acceptance_stage(client, with_task=True, task_done=False, deliverable_content=False)
+    session = get_session()
+    session.add(
+        StageBlocker(
+            stage_id=stage_id,
+            reason="环境不可用",
+            handler_id="stage-owner",
+            created_by="stage-member",
+            created_at="2026-08-20T10:00:00",
+            previous_stage_status="active",
+        )
+    )
+    session.commit()
+    session.close()
+
+    response = client.post(f"/api/projects/{project_id}/stages/{stage_id}/acceptances", json={"notes": "申请验收"}, headers=MEMBER)
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["message"] == "阶段验收条件未满足"
+    assert detail["incomplete_required_tasks"] == [{"id": detail["incomplete_required_tasks"][0]["id"], "title": "验收任务"}]
+    assert detail["missing_required_deliverables"] == [{"id": detail["missing_required_deliverables"][0]["id"], "name": "部署说明"}]
+    assert detail["unresolved_stage_blockers"][0]["reason"] == "环境不可用"
+    assert list_stages(client, project_id)[0]["status"] == "active"
+
+
+def test_non_stage_owner_cannot_submit_acceptance(client):
+    project_id, stage_id = prepare_acceptance_stage(client)
+    plain = {"X-User-Id": "plain-member"}
+    assert client.post(f"/api/projects/{project_id}/members", json={"user_id": "plain-member", "name": "普通成员", "email": "plain@test.local"}, headers=OWNER).status_code == 200
+    response = client.post(f"/api/projects/{project_id}/stages/{stage_id}/acceptances", json={}, headers=plain)
+    assert response.status_code == 403
+    assert response.json()["detail"] == "只有阶段负责人或项目负责人可以提交阶段验收"
+
+
+def test_submit_acceptance_success_and_pending_stage_is_read_only(client):
+    project_id, stage_id = prepare_acceptance_stage(client)
+    response = client.post(f"/api/projects/{project_id}/stages/{stage_id}/acceptances", json={"note": "材料齐备"}, headers=MEMBER)
+    assert response.status_code == 201
+    body = response.json()
+    assert body["status"] == "pending"
+    assert body["submitted_by"] == "stage-member"
+    assert body["submitted_at"]
+    assert body["handled_by"] is None
+    assert body["notes"] == "材料齐备"
+    assert body["note"] == "材料齐备"
+    assert list_stages(client, project_id)[0]["status"] == "pending_acceptance"
+    assert "stage_acceptance_submitted" in activity_types(project_id)
+
+    deliverables = client.get(f"/api/projects/{project_id}/stages/{stage_id}/deliverables", headers=OWNER).json()
+    frozen = client.patch(
+        f"/api/projects/{project_id}/stages/{stage_id}/deliverables/{deliverables[0]['id']}",
+        json={"name": "不能修改"},
+        headers=MEMBER,
+    )
+    assert frozen.status_code == 409
+    assert frozen.json()["detail"] == "待验收阶段为只读"
+
+
+def test_approve_acceptance_then_reopen_completed_stage(client):
+    project_id, stage_id = prepare_acceptance_stage(client)
+    acceptance = client.post(f"/api/projects/{project_id}/stages/{stage_id}/acceptances", json={}, headers=MEMBER).json()
+
+    approved = client.patch(
+        f"/api/projects/{project_id}/stages/{stage_id}/acceptances/{acceptance['id']}",
+        json={"action": "approve", "note": "验收通过"},
+        headers=OWNER,
+    )
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "approved"
+    assert approved.json()["handled_by"] == "stage-owner"
+    assert approved.json()["reviewed_by"] == "stage-owner"
+    assert approved.json()["handled_at"]
+    assert approved.json()["notes"] == "验收通过"
+    assert list_stages(client, project_id)[0]["status"] == "completed"
+    assert "stage_acceptance_approved" in activity_types(project_id)
+
+    no_reason = client.post(f"/api/projects/{project_id}/stages/{stage_id}/reopen", json={"reason": " "}, headers=OWNER2)
+    assert no_reason.status_code == 422
+    member_reopen = client.post(f"/api/projects/{project_id}/stages/{stage_id}/reopen", json={"reason": "补充材料"}, headers=MEMBER)
+    assert member_reopen.status_code == 403
+    reopened = client.post(f"/api/projects/{project_id}/stages/{stage_id}/reopen", json={"reason": "需求补充"}, headers=OWNER2)
+    assert reopened.status_code == 200
+    assert reopened.json()["status"] == "active"
+    records = client.get(f"/api/projects/{project_id}/stages/{stage_id}/acceptances", headers=MEMBER).json()
+    assert records[0]["status"] == "approved"
+    assert "stage_reopened" in activity_types(project_id)
+
+
+def test_reject_acceptance_requires_reason_and_independent_handler(client):
+    project_id, stage_id = prepare_acceptance_stage(client)
+    acceptance = client.post(f"/api/projects/{project_id}/stages/{stage_id}/acceptances", json={}, headers=OWNER).json()
+
+    self_review = client.patch(
+        f"/api/projects/{project_id}/stages/{stage_id}/acceptances/{acceptance['id']}",
+        json={"action": "approve"},
+        headers=OWNER,
+    )
+    assert self_review.status_code == 403
+    assert self_review.json()["detail"] == "不能验收自己提交的阶段"
+
+    missing_reason = client.patch(
+        f"/api/projects/{project_id}/stages/{stage_id}/acceptances/{acceptance['id']}",
+        json={"action": "reject"},
+        headers=OWNER2,
+    )
+    assert missing_reason.status_code == 422
+
+    rejected = client.patch(
+        f"/api/projects/{project_id}/stages/{stage_id}/acceptances/{acceptance['id']}",
+        json={"action": "reject", "rejection_reason": "材料不完整"},
+        headers=OWNER2,
+    )
+    assert rejected.status_code == 200
+    assert rejected.json()["status"] == "rejected"
+    assert rejected.json()["rejection_reason"] == "材料不完整"
+    assert list_stages(client, project_id)[0]["status"] == "active"
+    assert "stage_acceptance_rejected" in activity_types(project_id)

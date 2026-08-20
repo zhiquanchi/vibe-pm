@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+
+DeliverableType = Literal["document", "code", "deployment", "other"]
+DeliverableContentKind = Literal["text", "link", "file"]
 
 
 class StageTemplateItem(BaseModel):
@@ -47,6 +52,84 @@ class StageCompleteRequest(BaseModel):
 
 class StageOwnerRequest(BaseModel):
     owner_id: str = Field(min_length=1)
+
+
+# --- PRD-05: stage deliverables & acceptance ---
+
+
+class StageDeliverableCreate(BaseModel):
+    name: str = Field(min_length=1)
+    type: DeliverableType
+    content_kind: DeliverableContentKind = "link"
+    text: str | None = None
+    link: str | None = None
+    file_path: str | None = None
+    file_name: str | None = None
+    file_size: int | None = Field(default=None, ge=0)
+    # Compatibility with the frontend-first PRD-05 contract. It is persisted in
+    # file_path so the database remains aligned with the OpenSpec design.
+    file_url: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, value: str) -> str:
+        name = value.strip()
+        if not name:
+            raise ValueError("交付物名称不能为空")
+        return name
+
+
+class StageDeliverableUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1)
+    type: DeliverableType | None = None
+    content_kind: DeliverableContentKind | None = None
+    text: str | None = None
+    link: str | None = None
+    file_path: str | None = None
+    file_name: str | None = None
+    file_size: int | None = Field(default=None, ge=0)
+    file_url: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        name = value.strip()
+        if not name:
+            raise ValueError("交付物名称不能为空")
+        return name
+
+
+class StageAcceptanceSubmit(BaseModel):
+    notes: str | None = None
+    # Frontend-first contract used ``note``; accept either spelling.
+    note: str | None = None
+
+    @model_validator(mode="after")
+    def _normalize_notes(self):
+        if self.notes is None and self.note is not None:
+            self.notes = self.note
+        return self
+
+
+class StageAcceptanceHandle(BaseModel):
+    action: Literal["approve", "reject"]
+    notes: str | None = None
+    note: str | None = None
+    rejection_reason: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_handle(self):
+        if self.notes is None and self.note is not None:
+            self.notes = self.note
+        if self.action == "reject" and (self.rejection_reason is None or not self.rejection_reason.strip()):
+            raise ValueError("驳回阶段验收时必须填写原因")
+        return self
+
+
+class StageReopenRequest(BaseModel):
+    reason: str = Field(min_length=1)
 
 
 # --- PRD-03: filters for the stage task workbench ---
