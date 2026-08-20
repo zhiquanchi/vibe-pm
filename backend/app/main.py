@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import cors_origins
 from app.core.logging_config import setup_logging
+from app.routers.copilot import router as copilot_router
 
 # Configure loguru (single writer to /var/log/vibe-pm/source/backend.log as flat
 # JSON, plus a stderr sink). Uvicorn's stdlib logs are bridged into loguru via
@@ -37,6 +38,7 @@ app.add_middleware(
 # Domain routers are registered before the legacy compatibility router so the
 # persisted Sprint/task workflows are the canonical handlers.
 app.include_router(projects_router)
+app.include_router(copilot_router)
 app.include_router(stages_router)
 app.include_router(sprint_backlog_router)
 app.include_router(tasks_router)
