@@ -123,6 +123,7 @@ export function AppShell({
           <nav>
             {nav(base, '总览', <LayoutDashboard size={17} />, true)}
             {nav(`${base}/stages`, '阶段', <Milestone size={17} />)}
+            {nav(`${base}/activity`, '活动', <Activity size={17} />)}
             {nav(`${base}/members`, '成员', <Users size={17} />)}
             {nav(`${base}/settings`, '设置', <Settings2 size={17} />)}
           </nav>

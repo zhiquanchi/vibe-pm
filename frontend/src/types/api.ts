@@ -432,6 +432,7 @@ export interface ProjectActivity {
   description: string;
   stage_id: number | null;
   stage_name: string | null;
+  task_id: number | null;
   created_by: string;
   created_by_name: string | null;
   created_at: string;

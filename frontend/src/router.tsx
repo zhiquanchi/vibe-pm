@@ -1,6 +1,7 @@
 import { Navigate, createBrowserRouter } from 'react-router-dom';
 import { GlobalLayout, ProjectLayout } from './layouts/ProjectLayout';
 import { OverviewView } from './views/OverviewView';
+import { ActivityView } from './views/ActivityView';
 import { StagesView } from './views/StagesView';
 import { StageWorkbenchView } from './views/StageWorkbenchView';
 import { MembersView } from './views/MembersView';
@@ -30,6 +31,7 @@ export const router = createBrowserRouter([
       { index: true, element: <OverviewView /> },
       { path: 'stages', element: <StagesView /> },
       { path: 'stages/:stageId', element: <StageWorkbenchView /> },
+      { path: 'activity', element: <ActivityView /> },
       { path: 'members', element: <MembersView /> },
       { path: 'settings', element: <SettingsView /> },
       // 兼容视图（Sprint 模型）
