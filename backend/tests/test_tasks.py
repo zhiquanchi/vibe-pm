@@ -235,6 +235,30 @@ def test_delete_normal_task(client):
     assert client.get(f"/api/projects/{project_id}/stages/{stage_id}/tasks", headers=OWNER).json() == []
 
 
+def test_delete_acceptance_required_task_rejected(client):
+    """PRD-05：验收必需任务不可直接删除，需先取消必需标记。"""
+    project_id = create_project(client, stages=[{"name": "开发"}])
+    stage_id = list_stages(client, project_id)[0]["id"]
+    task_id = create_task(client, project_id, stage_id).json()["id"]
+    client.patch(
+        f"/api/projects/{project_id}/tasks/{task_id}",
+        json={"acceptance_required": True},
+        headers=OWNER,
+    )
+
+    resp = client.delete(f"/api/projects/{project_id}/tasks/{task_id}", headers=OWNER)
+    assert resp.status_code == 409
+    assert "验收必需" in resp.json()["detail"]
+
+    # 取消必需标记后可删除
+    client.patch(
+        f"/api/projects/{project_id}/tasks/{task_id}",
+        json={"acceptance_required": False},
+        headers=OWNER,
+    )
+    assert client.delete(f"/api/projects/{project_id}/tasks/{task_id}", headers=OWNER).status_code == 200
+
+
 def test_delete_in_completed_stage_rejected(client):
     project_id = create_project(client, stages=[{"name": "一"}, {"name": "二"}])
     stages = list_stages(client, project_id)

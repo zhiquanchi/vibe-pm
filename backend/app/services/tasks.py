@@ -255,8 +255,8 @@ def _guard_delete(session: Session, project_id: int, task: Task) -> None:
 
     PRD-04: a task that is referenced as a dependency (``dependency_id``) of
     another task may not be deleted until those dependencies are removed.
-    PRD-05: ``stage_deliverables`` with ``is_required`` will add a second guard
-    here once that schema lands — left as a forward-integration point for now.
+    PRD-05: a task marked as an acceptance-required item cannot be deleted
+    until the owner clears that flag.
     """
     dependency_count = session.scalar(
         select(func.count()).select_from(TaskDependency).where(TaskDependency.dependency_id == task.id)
@@ -265,6 +265,11 @@ def _guard_delete(session: Session, project_id: int, task: Task) -> None:
         raise HTTPException(
             status_code=409,
             detail=f"该任务被 {dependency_count} 个任务依赖，请先解除依赖关系",
+        )
+    if task.acceptance_required:
+        raise HTTPException(
+            status_code=409,
+            detail="该任务是阶段验收必需项，请先取消验收必需标记再删除",
         )
 
 
