@@ -8,8 +8,9 @@
 
 - `app/main.py`：应用工厂、生命周期与中间件
 - `app/routers/api.py`：HTTP 端点与状态码
-- `app/routers/projects.py` + `app/services/projects.py`：项目成员管理、角色调整、移除校验与活动记录
-- `app/routers/stages.py` + `app/services/stages.py`：项目阶段模板、结构管理、阶段负责人分配、主阶段规则与活动记录
+- `app/routers/projects.py` + `app/services/projects.py`：项目成员管理、角色调整、移除校验、项目总览聚合、风险展示与活动记录查询
+- `app/routers/stages.py` + `app/services/stages.py`：项目阶段模板、结构管理、阶段负责人分配、主阶段规则、阶段交付物与验收（必需标记、提交/确认/驳回、重新打开已完成阶段）与活动记录
+- `app/routers/copilot.py` + `app/services/copilot.py`：AI 项目副驾驶的确定性规则引擎，实时读取项目/阶段/任务/依赖/阻塞/活动记录，生成摘要、风险分析、个人建议、问答与近期变化回顾
 - `app/routers/tasks.py` + `app/services/tasks.py`：基于阶段的阶段任务管理（阶段内创建/编辑/推进、在未完成阶段间移动、带依赖守卫的删除、状态流转校验、跨项目「我的任务」列表），以及任务依赖/阻塞管理（带循环检测的前置依赖、任务与阶段阻塞的解除/确认流程）与活动记录
 - `app/schemas/`：Pydantic 请求校验
 - `app/db/models.py`：全部数据表的 SQLAlchemy ORM 模型
